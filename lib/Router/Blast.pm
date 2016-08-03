@@ -28,7 +28,7 @@ sub new {
 }
 
 
-sub connect {
+sub add {
   my $self  = shift;
   my $name  = shift;
   my $route = shift // croak 'no route supplied';
@@ -209,7 +209,7 @@ sub new {
 }
 
 
-sub connect {
+sub add {
   my $self  = shift;
   my $name  = shift;
   my $route = shift // croak 'no route supplied';
@@ -220,7 +220,7 @@ sub connect {
   $name  = join '_', grep { defined } $self->{name}, $name;
   $route = join '', grep { defined } $self->{route}, $route;
 
-  $parent->connect(
+  $parent->add(
     $name,
     $route,
     %args,
