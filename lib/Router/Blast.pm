@@ -49,14 +49,15 @@ sub add {
   my %args  = @_;
 
   croak "Route '$name' already defined" if $self->{index}{ $name };
-  $route =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x or croak "invalid route specification '$route'";
-  (my $methods, $route) = ($1, $2);
+  $route =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x
+    or croak "invalid route specification '$route'";
+  (my $allowed_methods, $route) = ($1, $2);
 
-  my @methods =
+  my @allowed_methods =
     sort
     map  { s/^\s+|\s+$//g; uc $_ }
     grep { defined }
-    split '\|', $methods // ''
+    split '\|', $allowed_methods // ''
   ;
 
   delete $self->{regex}; # force recompile
@@ -100,7 +101,7 @@ sub add {
     name    => $name,
     route   => \@route,
     regex   => (join '', @regex),
-    methods => \@methods,
+    methods => \@allowed_methods,
     args    => \%args,
   };
 
@@ -156,6 +157,7 @@ sub match {
     }
   }
 
+  # XXX Most of the time is related to copying the %+ hash; faster way?
   return { %{ $route->{args} }, %+ };
 }
 
