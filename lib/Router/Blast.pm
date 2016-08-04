@@ -140,6 +140,7 @@ sub match {
 
   my $match = $self->{match};
   $$match = undef;
+  $self->{error} = undef;
 
   $path =~ /$regex/ or return $self->error(404);
 
