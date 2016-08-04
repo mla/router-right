@@ -4,6 +4,7 @@ package Router::Blast;
 use strict;
 use warnings;
 use Carp;
+use List::MoreUtils qw/ any /;
 use URI;
 use URI::QueryParam;
 
