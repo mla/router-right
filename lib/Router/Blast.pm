@@ -15,16 +15,29 @@ sub new {
   my $class = shift;
 
   $class = ref($class) || $class;
-  my $self = bless {}, $class;
 
-  $self->{routes} = []; # routes by insertion order
-  $self->{index}  = {}; # same routes, but indexed by name
- 
-  # route index of the last successful match
   my $match;
-  $self->{match} = \$match;
+
+  my $self = bless {
+    routes => [],      # routes in insertion order
+    index  => {},      # same routes, but indexed by name
+    match  => \$match, # route index of last match
+    error  => undef,   # status code of last match
+  }, $class;
 
   return $self;
+}
+
+
+sub error {
+  my $self = shift;
+
+  if (@_) {
+    $self->{error} = shift;
+    return;
+  }
+
+  return $self->{error};
 }
 
 
@@ -35,7 +48,15 @@ sub add {
   my %args  = @_;
 
   croak "Route '$name' already defined" if $self->{index}{ $name };
-  $route =~ m{^/} or croak "route '$route' must begin with slash";
+  $route =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x or croak "invalid route specification '$route'";
+  (my $methods, $route) = ($1, $2);
+
+  my @methods =
+    sort
+    map  { s/^\s+|\s+$//g; uc $_ }
+    grep { defined }
+    split '\|', $methods // ''
+  ;
 
   delete $self->{regex}; # force recompile
 
@@ -75,10 +96,11 @@ sub add {
   }
 
   local $_ = {
-    name  => $name,
-    route => \@route,
-    regex => (join '', @regex),
-    args  => \%args,
+    name    => $name,
+    route   => \@route,
+    regex   => (join '', @regex),
+    methods => \@methods,
+    args    => \%args,
   };
 
   push @{ $self->{routes} }, $_;
@@ -110,16 +132,27 @@ sub _compile {
 
 
 sub match {
-  my $self = shift;
-  my $path = shift;
+  my $self   = shift;
+  my $path   = shift;
+  my $method = shift;
 
   my $regex = $self->{regex} ||= $self->_compile;
 
-  $path =~ /$regex/ or return undef;
+  my $match = $self->{match};
+  $$match = undef;
 
-  my $idx = ${ $self->{match} };
-  my $route = $self->{routes}[ $idx ]
-    or croak "no route defined for match index '$idx'?!";
+  $path =~ /$regex/ or return $self->error(404);
+
+  # The regex above set the index of the matching route on success
+  my $route = $self->{routes}[ $$match ]
+    or croak "no route defined for match index '$$match'?!";
+
+  if ($method) {
+    my $allowed = $route->{methods};
+    if (@$allowed) {
+      any { uc $method eq $_ } @$allowed or return $self->error(405);
+    }
+  }
 
   return { %{ $route->{args} }, %+ };
 }
@@ -178,6 +211,18 @@ sub with {
     $self,
     @_,
   );
+}
+
+
+sub allowed_methods {
+  my $self = shift;
+
+  my $idx = ${ $self->{match} };
+  defined $idx or return;
+
+  my $route = $self->{routes}[ $idx ] or croak "no route found for idx '$idx'?!";
+  my $allowed = $route->{methods};
+  return wantarray ? @$allowed : [ @$allowed ];
 }
 
 
