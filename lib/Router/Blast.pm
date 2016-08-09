@@ -101,12 +101,12 @@ sub add {
   my @methods =
     sort { $a cmp $b }
     uniq 
-    grep { $_ ne '*' }
     map  { s/^\s+|\s+$//g; uc $_ }
     map  { split '\|' }
     grep { defined }
     $self->_list($args{methods}, $methods)
   ;
+  @methods = () if any { $_ eq '*' } @methods;
 
   delete $self->{regex}; # force recompile
 
@@ -154,8 +154,8 @@ sub add {
     source  => $route,
   };
 
-  use Data::Dumper;
-  warn "Added route: ", Dumper($_), "\n";
+  #use Data::Dumper;
+  #warn "Added route: ", Dumper($_), "\n";
 
   push @{ $self->{routes} }, $_;
   $self->{index}{ $name } = $_;
