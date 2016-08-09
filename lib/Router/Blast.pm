@@ -4,7 +4,7 @@ package Router::Blast;
 use strict;
 use warnings;
 use Carp;
-use List::MoreUtils qw/ any /;
+use List::MoreUtils qw/ any uniq /;
 use URI;
 use URI::QueryParam;
 
@@ -30,6 +30,13 @@ sub new {
 }
 
 
+sub _list {
+  my $class = shift;
+
+  return map { ref $_ eq 'ARRAY' ? @$_ : $_ } @_;
+}
+
+
 sub error {
   my $self = shift;
 
@@ -46,18 +53,21 @@ sub add {
   my $self  = shift;
   my $name  = shift;
   my $route = shift // croak 'no route supplied';
-  my %args  = @_;
+  my %args  = (@_ % 2 ? (payload => @_) : @_);
 
-  croak "Route '$name' already defined" if $self->{index}{ $name };
+  $args{payload} or croak 'no payload defined';
+
+  croak "route '$name' already defined" if $self->{index}{ $name };
   $route =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x
     or croak "invalid route specification '$route'";
-  (my $allowed_methods, $route) = ($1, $2);
+  (my $allow, $route) = ($1, $2);
 
-  my @allowed_methods =
+  my @allow =
     sort
+    uniq 
     map  { s/^\s+|\s+$//g; uc $_ }
     grep { defined }
-    split '\|', $allowed_methods // ''
+    $self->_list($args{allow}, split '\|', $allow || '')
   ;
 
   delete $self->{regex}; # force recompile
@@ -101,8 +111,8 @@ sub add {
     name    => $name,
     route   => \@route,
     regex   => (join '', @regex),
-    methods => \@allowed_methods,
-    args    => \%args,
+    methods => \@allow,
+    payload => $args{payload},
   };
 
   push @{ $self->{routes} }, $_;
@@ -151,14 +161,14 @@ sub match {
     or croak "no route defined for match index '$$match'?!";
 
   if ($method) {
-    my $allowed = $route->{methods};
-    if (@$allowed) {
-      any { uc $method eq $_ } @$allowed or return $self->error(405);
+    my $allow = $route->{methods};
+    if (@$allow) {
+      any { uc $method eq $_ } @$allow or return $self->error(405);
     }
   }
 
   # XXX Most of the time is related to copying the %+ hash; faster way?
-  return { %{ $route->{args} }, %+ };
+  return { %{ $route->{payload} }, %+ };
 }
 
 
@@ -224,9 +234,11 @@ sub allowed_methods {
   my $idx = ${ $self->{match} };
   defined $idx or return;
 
-  my $route = $self->{routes}[ $idx ] or croak "no route found for idx '$idx'?!";
-  my $allowed = $route->{methods};
-  return wantarray ? @$allowed : [ @$allowed ];
+  my $route = $self->{routes}[ $idx ]
+    or croak "no route found for idx '$idx'?!";
+
+  my $allow = $route->{methods};
+  return wantarray ? @$allow : [ @$allow ];
 }
 
 
@@ -262,7 +274,6 @@ sub add {
   my $self  = shift;
   my $name  = shift;
   my $route = shift // croak 'no route supplied';
-  my %args  = (@{ $self->{args} }, @_);
 
   my $parent = $self->{parent} or croak 'no parent?!';
 
@@ -272,7 +283,7 @@ sub add {
   $parent->add(
     $name,
     $route,
-    %args,
+    @{ $self->{args} }, @_,
   );
 
   return $self;
