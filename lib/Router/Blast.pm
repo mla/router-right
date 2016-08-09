@@ -99,8 +99,9 @@ sub add {
   (my $methods, $route) = $self->_split_route($route);
 
   my @methods =
-    sort
+    sort { $a cmp $b }
     uniq 
+    grep { $_ ne '*' }
     map  { s/^\s+|\s+$//g; uc $_ }
     map  { split '\|' }
     grep { defined }
