@@ -62,12 +62,28 @@ sub _args {
       my $payload = shift @args;
       $merged{ $key } ||= {};
       @{ $merged{ $key } }{ keys %$payload } = values %$payload;
+    } elsif ($key eq 'methods') {
+      $merged{ $key } = [
+        grep { defined }
+        $self->_list($merged{ $key }, shift @args)
+      ];
     } else {
       $merged{ $key } = shift @args;
     }
   }
 
   return wantarray ? %merged : \%merged;
+}
+
+sub _split_route {
+  my $self = shift;
+  my $route = shift or croak 'no route supplied';
+
+  $route =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x
+    or croak "invalid route specification '$route'";
+  (my $methods, $route) = ($1, $2);
+
+  return ($methods, $route);
 }
 
 
@@ -80,16 +96,15 @@ sub add {
   $args{payload} or croak 'no payload defined';
 
   croak "route '$name' already defined" if $self->{index}{ $name };
-  $route =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x
-    or croak "invalid route specification '$route'";
-  (my $allow, $route) = ($1, $2);
+  (my $methods, $route) = $self->_split_route($route);
 
-  my @allow =
+  my @methods =
     sort
     uniq 
     map  { s/^\s+|\s+$//g; uc $_ }
+    map  { split '\|' }
     grep { defined }
-    $self->_list($args{allow}, split '\|', $allow || '')
+    $self->_list($args{methods}, $methods)
   ;
 
   delete $self->{regex}; # force recompile
@@ -133,13 +148,13 @@ sub add {
     name    => $name,
     route   => \@route,
     regex   => (join '', @regex),
-    methods => \@allow,
+    methods => \@methods,
     payload => $args{payload},
     source  => $route,
   };
 
-  #use Data::Dumper;
-  #warn "Added route: ", Dumper($_), "\n";
+  use Data::Dumper;
+  warn "Added route: ", Dumper($_), "\n";
 
   push @{ $self->{routes} }, $_;
   $self->{index}{ $name } = $_;
@@ -304,6 +319,12 @@ sub new {
   my $route  = shift;
   my %args   = Router::Blast->_args(@_);
 
+  (my $methods, $route) = Router::Blast->_split_route($route);
+
+  $args{methods} = [
+    grep { defined } Router::Blast->_list($args{methods}, $methods)
+  ];
+
   $class = ref($class) || $class;
   my $self = bless {
     parent => $parent,
@@ -328,6 +349,8 @@ sub add {
 
   my $parent = $self->{parent} or croak 'no parent?!';
 
+  (my $methods, $route) = Router::Blast->_split_route($route);
+
   $name  = join '_', grep { defined } $self->{name}, $name;
   $route = join '', grep { defined } $self->{route}, $route;
 
@@ -335,7 +358,7 @@ sub add {
     $name,
     $route,
     %{ $self->{args} },
-    Router::Blast->_args(@_),
+    Router::Blast->_args(@_, methods => $methods),
   );
 
   return $self;
