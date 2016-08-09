@@ -3,7 +3,9 @@ package Router::Blast;
 
 use strict;
 use warnings;
+use overload '""' => 'as_string';
 use Carp;
+use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
 use URI;
 use URI::QueryParam;
@@ -49,11 +51,31 @@ sub error {
 }
 
 
+sub _args {
+  my $self = shift;
+  my @args = (@_ % 2 ? (payload => @_) : @_);
+
+  my %merged;
+  while (@args) {
+    my $key = shift @args;
+    if ($key eq 'payload') {
+      my $payload = shift @args;
+      $merged{ $key } ||= {};
+      @{ $merged{ $key } }{ keys %$payload } = values %$payload;
+    } else {
+      $merged{ $key } = shift @args;
+    }
+  }
+
+  return wantarray ? %merged : \%merged;
+}
+
+
 sub add {
   my $self  = shift;
   my $name  = shift;
   my $route = shift // croak 'no route supplied';
-  my %args  = (@_ % 2 ? (payload => @_) : @_);
+  my %args  = $self->_args(@_);
 
   $args{payload} or croak 'no payload defined';
 
@@ -113,7 +135,11 @@ sub add {
     regex   => (join '', @regex),
     methods => \@allow,
     payload => $args{payload},
+    source  => $route,
   };
+
+  #use Data::Dumper;
+  #warn "Added route: ", Dumper($_), "\n";
 
   push @{ $self->{routes} }, $_;
   $self->{index}{ $name } = $_;
@@ -242,6 +268,29 @@ sub allowed_methods {
 }
 
 
+sub as_string {
+  my $self = shift;
+
+  my @routes;
+  my $max_name_len   = 0;
+  my $max_method_len = 0;
+  foreach (@{ $self->{routes} }) {
+    my $methods = join ',', @{ $_->{methods} };
+
+    $max_name_len   = max($max_name_len, length $_->{name});
+    $max_method_len = max($max_method_len, length $methods);
+
+    push @routes, [ $_->{name}, $methods || '*', $_->{source} ];
+  }
+
+  my $str = '';
+  foreach (@routes) {
+    $str .= sprintf "%${max_name_len}s %-${max_method_len}s %s\n", @$_;
+  }
+  return $str;
+}
+
+
 package Router::Blast::Submapper;
 
 use strict;
@@ -253,18 +302,20 @@ sub new {
   my $parent = shift or croak 'no parent supplied';
   my $name   = shift;
   my $route  = shift;
-
-  my $func = (@_ && @_ % 2 && ref $_[-1] eq 'CODE') ? pop @_ : undef;
+  my %args   = Router::Blast->_args(@_);
 
   $class = ref($class) || $class;
   my $self = bless {
     parent => $parent,
     name   => $name,
     route  => $route,
-    args   => [ @_ ],
+    args   => \%args,
   };
 
-  $func->($self) if $func;
+  if (my $func = $args{call}) {
+    local $_ = $self;
+    $func->($self);
+  }
 
   return $self;
 }
@@ -283,7 +334,8 @@ sub add {
   $parent->add(
     $name,
     $route,
-    @{ $self->{args} }, @_,
+    %{ $self->{args} },
+    Router::Blast->_args(@_),
   );
 
   return $self;
