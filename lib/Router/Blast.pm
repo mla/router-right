@@ -87,6 +87,23 @@ sub _split_route {
 }
 
 
+sub _methods {
+  my $self = shift;
+
+  my @methods = 
+    sort { $a cmp $b }
+    uniq 
+    map  { s/^\s+|\s+$//g; uc $_ }
+    map  { split '[|,]' }
+    grep { defined }
+    $self->_list(@_)
+  ;
+  @methods = () if any { $_ eq '*' } @methods;
+
+  return wantarray ? @methods : \@methods;
+}
+
+
 sub add {
   my $self  = shift;
   my $name  = shift;
@@ -97,16 +114,7 @@ sub add {
 
   croak "route '$name' already defined" if $self->{index}{ $name };
   (my $methods, $route) = $self->_split_route($route);
-
-  my @methods =
-    sort { $a cmp $b }
-    uniq 
-    map  { s/^\s+|\s+$//g; uc $_ }
-    map  { split '\|' }
-    grep { defined }
-    $self->_list($args{methods}, $methods)
-  ;
-  @methods = () if any { $_ eq '*' } @methods;
+  my @methods = $self->_methods($args{methods}, $methods);
 
   delete $self->{regex}; # force recompile
 
@@ -321,10 +329,7 @@ sub new {
   my %args   = Router::Blast->_args(@_);
 
   (my $methods, $route) = Router::Blast->_split_route($route);
-
-  $args{methods} = [
-    grep { defined } Router::Blast->_list($args{methods}, $methods)
-  ];
+  $args{methods} = [ Router::Blast->_methods($args{methods}, $methods) ];
 
   $class = ref($class) || $class;
   my $self = bless {
