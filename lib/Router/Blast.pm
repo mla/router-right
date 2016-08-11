@@ -3,7 +3,6 @@ package Router::Blast;
 
 use strict;
 use warnings;
-use overload '""' => 'as_string';
 use Carp;
 use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
@@ -36,6 +35,15 @@ sub _list {
   my $class = shift;
 
   return map { ref $_ eq 'ARRAY' ? @$_ : $_ } @_;
+}
+
+
+# mainly for testing right now
+sub _route {
+  my $self = shift;
+  my $name = shift or croak 'no name supplied';
+
+  return $self->{index}{ $name };
 }
 
 
@@ -176,6 +184,7 @@ sub _compile {
   my $self = shift;
 
   my $routes = $self->{routes};
+  @$routes or return qr/(?!)/; # pattern can never match
 
   my $match = $self->{match};
 
