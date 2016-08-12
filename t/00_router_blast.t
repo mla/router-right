@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Test::Spec;
 
-my $CLASS = 'Router::Blast';
+my $CLASS = 'Router::Right';
 
 use_ok $CLASS;
 

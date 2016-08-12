@@ -1,4 +1,4 @@
-package Router::Blast;
+package Router::Right;
 # ABSTRACT: FIX ME
 
 use strict;
@@ -280,7 +280,7 @@ sub url {
 sub with {
   my $self = shift;
 
-  return Router::Blast::Submapper->new(
+  return Router::Right::Submapper->new(
     $self,
     @_,
   );
@@ -324,7 +324,7 @@ sub as_string {
 }
 
 
-package Router::Blast::Submapper;
+package Router::Right::Submapper;
 
 use strict;
 use warnings;
@@ -335,10 +335,10 @@ sub new {
   my $parent = shift or croak 'no parent supplied';
   my $name   = shift;
   my $route  = shift;
-  my %args   = Router::Blast->_args(@_);
+  my %args   = Router::Right->_args(@_);
 
-  (my $methods, $route) = Router::Blast->_split_route($route);
-  $args{methods} = [ Router::Blast->_methods($args{methods}, $methods) ];
+  (my $methods, $route) = Router::Right->_split_route($route);
+  $args{methods} = [ Router::Right->_methods($args{methods}, $methods) ];
 
   $class = ref($class) || $class;
   my $self = bless {
@@ -364,7 +364,7 @@ sub add {
 
   my $parent = $self->{parent} or croak 'no parent?!';
 
-  (my $methods, $route) = Router::Blast->_split_route($route);
+  (my $methods, $route) = Router::Right->_split_route($route);
 
   $name  = join '_', grep { defined } $self->{name}, $name;
   $route = join '', grep { defined } $self->{route}, $route;
@@ -373,7 +373,7 @@ sub add {
     $name,
     $route,
     %{ $self->{args} },
-    Router::Blast->_args(@_, methods => $methods),
+    Router::Right->_args(@_, methods => $methods),
   );
 
   return $self;
