@@ -15,7 +15,7 @@ describe 'Submapper' => sub {
     $r = $CLASS->new;
   };
 
-  it 'inherits defaults' => sub {
+  it 'applies defaults' => sub {
     my $payload = { controller => 'Admin' };
 
     $r->with(admin => '/admin', $payload)
@@ -39,7 +39,7 @@ describe 'Submapper' => sub {
     ok $r->match('/admin/users/foo');
   };
 
-  it 'can use callback' => sub {
+  it 'can apply callback' => sub {
     my $payload = { controller => 'Admin' };
     $r->with(admin => '/admin', $payload, call => sub {
       $_->add(users => '/users');
