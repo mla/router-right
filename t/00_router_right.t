@@ -158,18 +158,30 @@ describe 'Router' => sub {
     is_deeply scalar $r->allowed_methods, ['POST'];
   };
 
-  it 'can construct url from route' => sub {
-    $r->add(
-      entry => '/entries/{year}/{month}/{day}',
-      { controller => 'Entries' },
-    );
-    my $url = $r->url('entry', year => '1916', month => '08', day => '14');
-    is $url, '/entries/1916/08/14';
-  };
+  describe 'can build url' => sub {
+    it 'from route' => sub {
+      $r->add(
+        entry => '/entries/{year}/{month}/{day}',
+        { controller => 'Entries' },
+      );
+      my $url = $r->url('entry', year => '1916', month => '08', day => '14');
+      is $url, '/entries/1916/08/14';
+    };
 
-  it 'can construct url from literal string' => sub {
-    my $url = $r->url('/entries/{year}', year => '1916', q => 'abc');
-    is $url, '/entries/1916?q=abc';
+    it 'from literal url' => sub {
+      my $url = $r->url('/foo/zort', q => 'abc');
+      is $url, '/foo/zort?q=abc';
+    };
+
+    it 'from literal url with placeholders' => sub {
+      my $url = $r->url('/entries/{year}', year => '1916', q => 'abc');
+      is $url, '/entries/1916?q=abc';
+    };
+
+    it 'but raises exception if unknown name and not a url' => sub {
+      eval { $r->url('unknown') }; # isn't route name or a url string
+      ok $@;
+    };
   };
 
   it 'can have an error code set' => sub {
