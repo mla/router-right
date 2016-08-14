@@ -80,6 +80,7 @@ describe 'Router' => sub {
     it 'a known route returns payload' => sub {
       $r->add(home => '/', $payload);
       is_deeply $r->match('/'), $payload;
+      is_deeply $r->match('/'), $payload, 'cached regex';
     };
 
     it 'an unknown route returns undef' => sub {
@@ -164,6 +165,16 @@ describe 'Router' => sub {
     );
     my $url = $r->url('entry', year => '1916', month => '08', day => '14');
     is $url, '/entries/1916/08/14';
+  };
+
+  it 'can construct url from literal string' => sub {
+    my $url = $r->url('/entries/{year}', year => '1916', q => 'abc');
+    is $url, '/entries/1916?q=abc';
+  };
+
+  it 'can have an error code set' => sub {
+    is $r->error(404), undef;
+    is $r->error, 404;
   };
 };
 

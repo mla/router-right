@@ -112,23 +112,14 @@ sub _methods {
 }
 
 
-sub add {
-  my $self  = shift;
-  my $name  = shift;
-  my $route = shift // croak 'no route supplied';
-  my %args  = $self->_args(@_);
-
-  $args{payload} or croak 'no payload defined';
-
-  croak "route '$name' already defined" if $self->{index}{ $name };
-  (my $methods, $route) = $self->_split_route($route);
-  my @methods = $self->_methods($args{methods}, $methods);
-
-  delete $self->{regex}; # force recompile
+sub _build_route {
+  my $class = shift;
+  my $route = shift or croak 'no route supplied';
+  my $args  = shift or croak 'no args supplied';
 
   my @route = split /{([^}]+)}/, $route;
-  my $is_placeholder = 0;
   my @regex;
+  my $is_placeholder = 0;
   foreach (@route) {
     if ($is_placeholder) {
       /^([^:]+):?(.*)$/ or croak "invalid placeholder '$_'";
@@ -142,7 +133,7 @@ sub add {
         $regex = '[^.\s/]+?' unless length $regex;
         $pre = '\\.';
       } else {
-        $optional = exists $args{ $pname } ? 1 : 0;
+        $optional = exists $args->{ $pname } ? 1 : 0;
         $regex = '[^/]+?' unless length $regex;
       }
 
@@ -161,10 +152,30 @@ sub add {
     $is_placeholder = !$is_placeholder;
   }
 
+  return \@route, join('', @regex);
+}
+
+
+sub add {
+  my $self  = shift;
+  my $name  = shift;
+  my $route = shift // croak 'no route supplied';
+  my %args  = $self->_args(@_);
+
+  $args{payload} or croak 'no payload defined';
+
+  croak "route '$name' already defined" if $self->{index}{ $name };
+  (my $methods, $route) = $self->_split_route($route);
+  my @methods = $self->_methods($args{methods}, $methods);
+
+  delete $self->{regex}; # force recompile
+
+  my ($route_arrayref, $regex) = $self->_build_route($route, \%args);
+
   local $_ = {
     name    => $name,
-    route   => \@route,
-    regex   => (join '', @regex),
+    route   => $route_arrayref,
+    regex   => $regex,
     methods => \@methods,
     payload => $args{payload},
     source  => $route,
@@ -240,7 +251,12 @@ sub url {
   if (my $route = $self->{index}{ $name }) {
     @route = @{ $route->{route} };    
   } elsif ($name =~ m{^/}) {
-    @route = ($name); # url, not name
+    if ($name =~ /{/) {
+      my ($route, $regex) = $self->_build_route($name, {});
+      @route = @$route;
+    } else {
+      @route = ($name); # url, not really a name
+    }
   } else {
     croak "url name '$name' not found";
   }
