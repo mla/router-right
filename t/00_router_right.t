@@ -8,7 +8,10 @@ my $CLASS = 'Router::Right';
 
 use_ok $CLASS;
 
-isa_ok $CLASS->new, $CLASS, 'constructor';
+my $r = $CLASS->new;
+isa_ok $r, $CLASS, 'constructor';
+
+isa_ok $r->new, $CLASS, 'constructor from instance';
 
 describe 'Router' => sub {
   my $r;
@@ -99,6 +102,17 @@ describe 'Router' => sub {
       $r->add(home => 'GET /', $payload);
       is $r->match('/', 'POST'), undef;
     };
+
+    it 'allows an optional format extension' => sub {
+      $r->add(download => '/dl/{file}{.format}', { controller => 'DL' });
+      my $rv = $r->match('/dl/foo');
+      is_deeply $rv, { controller => 'DL', file => 'foo' },
+        'matches without extension';
+
+      $rv = $r->match('/dl/foo.gz');
+      is_deeply $rv, { controller => 'DL', file => 'foo', format => 'gz' },
+        'matches with extension';
+    };
   };
 
   describe 'placeholder route' => sub {
@@ -129,6 +143,27 @@ describe 'Router' => sub {
         },
       ;
     };
+  };
+
+  it 'can produce list of routes' => sub {
+    $r->add(home => '/', { controller => 'Home' });
+    $r->add(add_entry => 'POST /entries/new', { controller => 'Entries' });
+    ok $r->as_string;
+  };
+
+  it 'can return list of allowed methods from previous match' => sub {
+    $r->add(add_entry => 'POST /entries/new', { controller => 'Entries' });
+    $r->match('/entries/new');
+    is_deeply scalar $r->allowed_methods, ['POST'];
+  };
+
+  it 'can construct url from route' => sub {
+    $r->add(
+      entry => '/entries/{year}/{month}/{day}',
+      { controller => 'Entries' },
+    );
+    my $url = $r->url('entry', year => '1916', month => '08', day => '14');
+    is $url, '/entries/1916/08/14';
   };
 };
 
