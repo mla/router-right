@@ -120,27 +120,34 @@ sub _build_route {
   my @route = split /{([^}]+)}/, $route;
   my @regex;
   my $is_placeholder = 0;
+  my %placeholders;
   foreach (@route) {
     if ($is_placeholder) {
       /^([^:]+):?(.*)$/ or croak "invalid placeholder '$_'";
       my ($pname, $regex) = ($1, $2);
 
       my $optional = 0;
-      my $pre = ''; # match before placeholder content
+      my $pre = '';  # match before placeholder content
+      # placeholder type; used to identify special ones like .format
+      my $type = ''; 
       if ($pname eq '.format') {
         $optional = 1;
         $pname = 'format';
         $regex = '[^.\s/]+?' unless length $regex;
         $pre = '\\.';
+        $type = 'fmt';
       } else {
         $optional = exists $args->{ $pname } ? 1 : 0;
         $regex = '[^/]+?' unless length $regex;
       }
 
+      croak "placeholder '$pname' redefined" if $placeholders{ $pname }++;
+
       $_ = {
         pname    => $pname,
         regex    => $regex,
         optional => $optional,
+        type     => $type,
       };
 
       my $opt = $optional ? '?' : '';
@@ -280,6 +287,10 @@ sub url {
     my $val = delete $args{ $pname } // '';
     $val =~ /$_->{regex}/
       or croak "invalid value for param '$pname' in url '$name'";
+
+    if ($pname eq 'format' && $_->{type} eq 'fmt') {
+      $val = ".$val";
+    }
 
     push @path, $val;
   } continue {
