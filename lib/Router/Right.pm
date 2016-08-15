@@ -135,7 +135,7 @@ sub _build_route {
         $pname = 'format';
         $regex = '[^.\s/]+?' unless length $regex;
         $pre = '\\.';
-        $type = 'fmt';
+        $type = '.';
       } else {
         $optional = exists $args->{ $pname } ? 1 : 0;
         $regex = '[^/]+?' unless length $regex;
@@ -288,7 +288,7 @@ sub url {
     $val =~ /$_->{regex}/
       or croak "invalid value for param '$pname' in url '$name'";
 
-    if ($pname eq 'format' && $_->{type} eq 'fmt') {
+    if ($pname eq 'format' && $_->{type} eq '.') {
       $val = ".$val";
     }
 
