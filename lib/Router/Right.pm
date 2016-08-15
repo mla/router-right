@@ -1,5 +1,5 @@
 package Router::Right;
-# ABSTRACT: FIX ME
+# ABSTRACT: Framework-agnostic URL routing engine for web applications
 
 use strict;
 use warnings;
@@ -419,4 +419,104 @@ sub with {
 
 __END__
 
+=encoding utf8
+
+=head1 NAME
+
+Router::Right - Framework-agnostic URL routing engine for web applications
+
+=head1 SYNOPSIS
+
+  use Router::Right;
+
+  my $r = Router::Right->new;
+
+  $r->add(
+    home => '/',
+    { controller => 'Home', action => 'show' },
+  );
+
+  $r->add(
+    blog => '/blog/{year}/{month}',
+    { controller => 'Blog', action => 'monthly' },
+  );
+
+  my $match = $r->match('/blog/1916/08'); 
+  # Returns {
+  #   controller => 'Blog',
+  #   action => 'monthly',
+  #   year => '1916',
+  #   month => '08',
+  # }
+
+=head1 DESCRIPTION
+
+Router::Right is a framework-agnostic routing engine used to map web
+application request URLs to application handlers.
+
+=METHODS
+
+=over 4
+
+=item new()
+
+Returns a new Router::Right instance
+
+=item add($name => $route, payload => \%payload [, %options])
+
+Define a route. $name is used to reference the route. On a successful match,
+the payload is returned as a hash reference; its content can be anything.
+
+See the ROUTE DEFINITION section for details on how $route values are
+specified.
+
+As a convience, the payload field name may be omitted. i.e., 
+add($name => $route_path, \%payload)
+
+=item match($url [, $method])
+
+Attempts to find a route that matches the supplied $url. Routes are
+matched in the order defined.
+
+If a match is found, its associated payload is returned. If not, undef
+is returned and the error() method can be checked to see why the match
+failed.
+
+$method, if supplied, is the HTTP method of the request
+(e.g., GET, POST, PUT, DELETE). Specifying $method may prevent a route
+from matching if the route was defined with a restricted set of allowed
+methods (see ROUTE DEFINITION). By default, all request methods are allowed.
+
+=item error()
+
+Returns the error code of the last failed match.
+
+  404 = no match found
+  405 = method not allowed
+
+A 405 result indicates a match was found, but the request method was
+not allowed. allowed_methods() can be called to obtain a list of the methods
+that are allowed by the route.
+
+=back
+
+=head1 SEE ALSO
+
+Much of the design of Router::Right comes from Tokuhiro Matsuno's
+Router::Simple and Router::Boom modules.
+
+Python's Routes module
+L<https://routes.readthedocs.io/en/latest/index.html>
+
+=head1 LICENSE
+
+Copyright (C) Maurice Aubrey
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+=cut
+
 # vim: set foldmethod=marker:
+
+
