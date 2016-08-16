@@ -499,7 +499,7 @@ failed.
 
 $method, if supplied, is the HTTP method of the request
 (e.g., GET, POST, PUT, DELETE). Specifying $method may prevent a route
-from matching if the route was defined with a restricted set of allowed
+from otherwise matching if the route was defined with a restricted set of allowed
 methods (see ROUTE DEFINITION). By default, all request methods are allowed.
 
 =item error()
@@ -512,6 +512,69 @@ Returns the error code of the last failed match.
 A 405 result indicates a match was found, but the request method was
 not allowed. allowed_methods() can be called to obtain a list of the methods
 that are allowed by the route.
+
+=item allowed_methods()
+
+Returns a list of the methods allowed by the last matched route. Returns a list in array context
+and an array reference in scalar context.
+
+An empty list indicates that all methods are accepted.
+
+=item url($name [, %params])
+
+Constructs a URL from the $name route. Placeholder values are supplied as %params. Unknown placeholder
+values are appended as query string parameters.
+
+Example:
+
+  $r->add(entry => '/entries/{year}', { controller => 'Entry' });
+  $r->url('entry', year => '1916', q => 'abc'); # produces /entries/1916?q=abc 
+
+The return value is a L<URI> instance.
+
+=item as_string()
+
+Returns a report of the defined methods, in order of definition.
+
+=item with($name => $route_path [, %options])
+
+Helper method to prevent code duplication. Allows route information to be shared
+across multiple routes. For example:
+
+  $r->with(admin => '/admin',        { controller => 'Admin' })
+    ->add(users  => '/users',        { action => 'users' })
+    ->add(trx    => '/transactions', { action => 'transactions' })
+  ;
+
+  print $r->as_string;
+
+  # prints:
+  #
+  #   admin_users * /admin/users
+  #   admin_trx   * /admin/transactions
+
+The payload contents are merged. The route names are joined by an underscore.
+The paths are simply concatenated.
+
+Either or both of $name and $route_path may be undefined.
+
+A callback is accepted, which allows chaining with() calls:
+
+  $r->with(admin => '/admin',  { controller => 'Admin' }, call => sub {
+    $_->add(users => '/users', { action => 'users' });
+    $_->add(log   => '/log',   { action => 'log' });
+  })->with(dashboard => '/dashboard', { controller => 'Admin::Dashboard' }, call => sub {
+    $_->add(view => '/{action}');
+  });
+
+  print $r->as_string;
+
+  # prints:
+  #   admin_users          * /admin/users
+  #   admin_log            * /admin/log
+  #   admin_dashboard_view * /admin/dashboard/{action}
+
+$_ is set to the router instance within the callback function. It is also supplied as a parameter.
 
 =back
 
