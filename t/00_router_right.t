@@ -95,8 +95,9 @@ describe 'Router' => sub {
     };
 
     it 'a route with matching methods returns payload' => sub {
-      $r->add(home => 'GET /', $payload);
-      is_deeply $r->match('/', 'GET'), $payload;
+      $r->add(get_home => 'GET /', { method => 'GET' });
+      $r->add(put_home => 'PUT /', { method => 'PUT' });
+      is_deeply $r->match('/', 'PUT'), { method => 'PUT' };
     };
 
     it 'a route with differing methods returns undef' => sub {
@@ -143,6 +144,11 @@ describe 'Router' => sub {
           day        => '11',
         },
       ;
+    };
+
+    it 'raises exception on duplicate placeholder' => sub {
+      eval { $r->add(entry => '/entry/{year}/{month}/{year}') };
+      ok $@;
     };
   };
 
