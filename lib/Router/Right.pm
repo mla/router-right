@@ -22,7 +22,8 @@ sub new {
 
   my $self = bless {
     routes     => [],      # routes in insertion order
-    name_index => {},      # same routes, but indexed by name
+    name_index => {},      # route name => route
+    path_index => {},      # route path => list of all routes using it
     match      => \$match, # route index of last match
     error      => undef,   # status code of last match
   }, $class;
@@ -83,15 +84,14 @@ sub _args {
   return wantarray ? %merged : \%merged;
 }
 
-sub _split_route {
+
+sub _split_route_path {
   my $self = shift;
-  my $route = shift or croak 'no route supplied';
+  my $path = shift or croak 'no route path supplied';
 
-  $route =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x
-    or croak "invalid route specification '$route'";
-  (my $methods, $route) = ($1, $2);
-
-  return ($methods, $route);
+  $path =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x
+    or croak "invalid route path specification '$path'";
+  return ($1, $2); # methods, path
 }
 
 
@@ -164,28 +164,28 @@ sub _build_route {
 
 
 sub add {
-  my $self  = shift;
-  my $name  = shift;
-  my $route = shift // croak 'no route supplied';
-  my %args  = $self->_args(@_);
+  my $self = shift;
+  my $name = shift;
+  my $path = shift // croak 'no route path supplied';
+  my %args = $self->_args(@_);
 
   $args{payload} or croak 'no payload defined';
 
   croak "route '$name' already defined" if $self->{name_index}{ $name };
-  (my $methods, $route) = $self->_split_route($route);
+  (my $methods, $path) = $self->_split_route_path($path);
   my @methods = $self->_methods($args{methods}, $methods);
 
   delete $self->{regex}; # force recompile
 
-  my ($route_arrayref, $regex) = $self->_build_route($route, \%args);
+  my ($route, $regex) = $self->_build_route($path, \%args);
 
   local $_ = {
     name    => $name,
-    route   => $route_arrayref,
+    route   => $route,
     regex   => $regex,
     methods => \@methods,
     payload => $args{payload},
-    source  => $route,
+    source  => $path,
   };
 
   #use Data::Dumper;
@@ -364,7 +364,7 @@ sub new {
   my $route  = shift;
   my %args   = Router::Right->_args(@_);
 
-  (my $methods, $route) = Router::Right->_split_route($route);
+  (my $methods, $route) = Router::Right->_split_route_path($route);
   $args{methods} = [ Router::Right->_methods($args{methods}, $methods) ];
 
   $class = ref($class) || $class;
@@ -391,7 +391,7 @@ sub add {
 
   my $parent = $self->{parent} or croak 'no parent?!';
 
-  (my $methods, $route) = Router::Right->_split_route($route);
+  (my $methods, $route) = Router::Right->_split_route_path($route);
 
   $name  = join '_', grep { defined } $self->{name}, $name;
   $route = join '', grep { defined } $self->{route}, $route;
