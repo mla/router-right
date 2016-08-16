@@ -1,5 +1,5 @@
 package Router::Right;
-# ABSTRACT: Framework-agnostic URL routing engine for web applications
+# ABSTRACT: Fast, framework-agnostic URL routing engine for web applications
 
 use strict;
 use warnings;
@@ -171,7 +171,7 @@ sub add {
 
   delete $self->{regex}; # force recompile
 
-  $args{payload} or croak 'no payload defined';
+  my $payload = delete $args{payload} or croak 'no payload defined';
   croak "route '$name' already defined" if $self->{name_index}{ $name };
 
   (my $methods, $path) = $self->_split_route_path($path);
@@ -188,7 +188,8 @@ sub add {
     index   => $index,
     regex   => $regex,
     methods => \@methods,
-    payload => $args{payload},
+    payload => $payload,
+    args    => \%args,
   };
 
   #use Data::Dumper;
@@ -269,9 +270,12 @@ sub url {
   my $name = shift or croak 'no url name supplied';
   my %args = @_;
 
+  my $route_args = {};
+
   my @route;
   if (my $route = $self->{name_index}{ $name }) {
     @route = @{ $route->{route} };    
+    $route_args = $route->{args};
   } elsif ($name =~ m{^/}) { # url, not a route name
     if ($name =~ /{/) { # has placeholders? if so, need to parse it
       my ($route, $regex) = $self->_build_route($name, {});
@@ -292,22 +296,24 @@ sub url {
     }
 
     my $pname = $_->{pname};
+    my $pval  = delete $args{ $pname };
 
-    unless (exists $args{ $pname }) {
+    unless (defined $pval) {
       $_->{optional}
         or croak "required param '$pname' missing from url '$name'";
-      next;
+      $pval = $route_args->{ $pname };
+      defined $pval or next;
     }
 
-    my $val = delete $args{ $pname } // '';
-    $val =~ /$_->{regex}/
-      or croak "invalid value for param '$pname' in url '$name'";
+    $pval //= '';
+    $pval =~ /$_->{regex}/
+      or croak "invalid value for param '$pname' in url '$name': '$pval'";
 
     if ($pname eq 'format' && $_->{type} eq '.') {
-      $val = ".$val";
+      $pval = ".$pval";
     }
 
-    push @path, $val;
+    push @path, $pval;
   } continue {
     $is_placeholder = !$is_placeholder;
   }
@@ -438,7 +444,7 @@ __END__
 
 =head1 NAME
 
-Router::Right - Framework-agnostic URL routing engine for web applications
+Router::Right - Fast, framework-agnostic URL routing engine for web applications
 
 =head1 SYNOPSIS
 
@@ -466,7 +472,7 @@ Router::Right - Framework-agnostic URL routing engine for web applications
 
 =head1 DESCRIPTION
 
-Router::Right is a framework-agnostic routing engine used to map web
+Router::Right is a fast, framework-agnostic routing engine used to map web
 application request URLs to application handlers.
 
 =METHODS
@@ -477,12 +483,13 @@ application request URLs to application handlers.
 
 Returns a new Router::Right instance
 
-=item add($name => $route, payload => \%payload [, %options])
+=item add($name => $route_path, payload => \%payload [, %options])
 
-Define a route. $name is used to reference the route. On a successful match,
-the payload is returned as a hash reference; its content can be anything.
+Define a route. $name is used to reference the route elsewhere.
+On a successful match, the payload hash reference is returned; its contents are
+completely user-defined and can contain anything.
 
-See the ROUTE DEFINITION section for details on how $route values are
+See the ROUTE DEFINITION section for details on how $route_path values are
 specified.
 
 As a convience, the payload field name may be omitted. i.e., 
@@ -532,6 +539,12 @@ Example:
 
 The return value is a L<URI> instance.
 
+Placeholder values are required unless the route supplied defaults. For example:
+
+  $r->add(entry => '/entries/{year}', { controller => 'Entry' }, year => '1916');
+  $r->url('entry', year => '1921'); # produces /entries/1921
+  $r->url('entry');                 # produces /entries/1916
+
 =item as_string()
 
 Returns a report of the defined methods, in order of definition.
@@ -578,10 +591,36 @@ $_ is set to the router instance within the callback function. It is also suppli
 
 =back
 
+=head1 ROUTE DEFINITION
+
+A route path is a normal URL path with the addition of placeholder variables.
+For example:
+
+  $r->add(entries => '/entries/{year}/{month}');
+
+defines a route path containing two placeholders, "year" and "month'. By default, a placeholder
+matches any string up to the next forward slash.
+
+Placeholder names must not begin with a number, nor contain hyphens.
+The default regular expression may be overridden. For example:
+
+  $r->add(entries => '/entries/{year:\d+}/{month:\d+}');
+
+is the same as above, except it will only match if both the year and month contain only digits.
+
+The special {.format} placeholder can be used to allow an optional file extension to be added.
+For example:
+
+  $r->add(download => '/dl/{file}{.format}', { controller => 'Download' });
+  $r->match('/dl/foo.gz'); # returns { controller => 'Download', file => 'foo', format => 'gz' }
+  $r->match('/dl/foo');    # returns { controller => 'Download', file => 'foo' }
+
+  # And to build a URL from it:
+  $r->url('download', file => 'foo', format => 'bz2'); # /dl/foo.bz2
+
 =head1 SEE ALSO
 
-Much of the design of Router::Right comes from Tokuhiro Matsuno's
-Router::Simple and Router::Boom modules.
+Router::Right is based on Tokuhiro Matsuno's Router::Simple and Router::Boom modules.
 
 Python's Routes module
 L<https://routes.readthedocs.io/en/latest/index.html>
