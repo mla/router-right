@@ -625,15 +625,6 @@ Router::Right is based on Tokuhiro Matsuno's Router::Simple and Router::Boom mod
 Python's Routes module
 L<https://routes.readthedocs.io/en/latest/index.html>
 
-=head1 LICENSE
-
-Copyright (C) Maurice Aubrey
-
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself.
-
 =cut
 
 # vim: set foldmethod=marker:
-
-

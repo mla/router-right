@@ -185,13 +185,6 @@ Router::Right is based on Tokuhiro Matsuno's Router::Simple and Router::Boom mod
 Python's Routes module
 [https://routes.readthedocs.io/en/latest/index.html](https://routes.readthedocs.io/en/latest/index.html)
 
-# LICENSE
-
-Copyright (C) Maurice Aubrey
-
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself.
-
 # AUTHOR
 
 Maurice Aubrey <maurice.aubrey@gmail.com>
