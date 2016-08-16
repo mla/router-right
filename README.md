@@ -39,6 +39,8 @@ application request URLs to application handlers.
 
 Router::Right - Fast, framework-agnostic URL routing engine for web applications
 
+# METHODS
+
 - new()
 
     Returns a new Router::Right instance
@@ -200,13 +202,5 @@ This software is copyright (c) 2016 by Maurice Aubrey.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
-
-# POD ERRORS
-
-Hey! **The above document had some coding errors, which are explained below:**
-
-- Around line 486:
-
-    Unknown directive: =METHODS
 
 [![Build Status](https://travis-ci.org/mla/time-ago.svg?branch=master)](https://travis-ci.org/mla/time-ago)
