@@ -24,7 +24,7 @@ sub new {
     routes      => [],      # routes in insertion order, grouped by path
     route_index => {},      # path => route index of group in above routes[]
     name_index  => {},      # route name => route
-    match       => \$match, # route index of last match
+    match       => \$match, # route group index of last match
     error       => undef,   # status code of last match
   }, $class;
 
@@ -259,6 +259,7 @@ sub match {
   $matched_route or return $self->error(405);
 
   # XXX Most of the time is related to copying the %+ hash; faster way?
+  # return { %{ $matched_route->{payload} } };
   return { %{ $matched_route->{payload} }, %+ };
 }
 
