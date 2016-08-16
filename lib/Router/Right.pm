@@ -472,7 +472,7 @@ Router::Right - Fast, framework-agnostic URL routing engine for web applications
 
 =head1 DESCRIPTION
 
-Router::Right is a fast, framework-agnostic routing engine used to map web
+Router::Right is a framework-agnostic routing engine used to map web
 application request URLs to application handlers.
 
 =METHODS
