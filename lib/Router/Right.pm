@@ -193,6 +193,7 @@ sub add {
 
   push @{ $self->{routes} }, $_;
   $self->{name_index}{ $name } = $_;
+  push @{ $self->{path_index}{ $path } ||= [] }, $_;
 
   return $self;
 }
@@ -201,17 +202,21 @@ sub add {
 sub _compile {
   my $self = shift;
 
-  my $routes = $self->{routes};
-  @$routes or return qr/(?!)/; # pattern can never match
+  my @routes = @{ $self->{routes} };
+  @routes or return qr/(?!)/; # pattern can never match
 
   my $match = $self->{match};
+
+  # assign position index, for convience
+  for (my $i = 0; $i < @routes; $i++) {
+    $routes[$i]{pos} = $i;
+  }
 
   # Tested faster to terminate each route with \z rather than placing
   # at end of combined regex.
   my $regex = join '|',
-    map { "(?: $_->[1]{regex} \\z (?{ \$\$match = $_->[0] }))" }
-    map { [$_, $routes->[$_]] }
-    (0..$#{ $routes })
+    map { "(?: $_->{regex} \\z (?{ \$\$match = $_->{pos} }))" }
+    @routes
   ;
 
   # warn "Regex: $regex\n";
