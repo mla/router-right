@@ -32,7 +32,7 @@ version 0.01
 
 # DESCRIPTION
 
-Router::Right is a fast, framework-agnostic routing engine used to map web
+Router::Right is a framework-agnostic routing engine used to map web
 application request URLs to application handlers.
 
 # NAME
