@@ -21,10 +21,10 @@ sub new {
   my $match;
 
   my $self = bless {
-    routes => [],      # routes in insertion order
-    index  => {},      # same routes, but indexed by name
-    match  => \$match, # route index of last match
-    error  => undef,   # status code of last match
+    routes     => [],      # routes in insertion order
+    name_index => {},      # same routes, but indexed by name
+    match      => \$match, # route index of last match
+    error      => undef,   # status code of last match
   }, $class;
 
   return $self;
@@ -43,7 +43,7 @@ sub _route {
   my $self = shift;
   my $name = shift or croak 'no name supplied';
 
-  return $self->{index}{ $name };
+  return $self->{name_index}{ $name };
 }
 
 
@@ -171,7 +171,7 @@ sub add {
 
   $args{payload} or croak 'no payload defined';
 
-  croak "route '$name' already defined" if $self->{index}{ $name };
+  croak "route '$name' already defined" if $self->{name_index}{ $name };
   (my $methods, $route) = $self->_split_route($route);
   my @methods = $self->_methods($args{methods}, $methods);
 
@@ -192,7 +192,7 @@ sub add {
   #warn "Added route: ", Dumper($_), "\n";
 
   push @{ $self->{routes} }, $_;
-  $self->{index}{ $name } = $_;
+  $self->{name_index}{ $name } = $_;
 
   return $self;
 }
@@ -255,14 +255,14 @@ sub url {
   my %args = @_;
 
   my @route;
-  if (my $route = $self->{index}{ $name }) {
+  if (my $route = $self->{name_index}{ $name }) {
     @route = @{ $route->{route} };    
-  } elsif ($name =~ m{^/}) {
-    if ($name =~ /{/) {
+  } elsif ($name =~ m{^/}) { # url, not a route name
+    if ($name =~ /{/) { # has placeholders? if so, need to parse it
       my ($route, $regex) = $self->_build_route($name, {});
       @route = @$route;
     } else {
-      @route = ($name); # url, not really a name
+      @route = ($name); # otherwise, treat it as string literal
     }
   } else {
     croak "url name '$name' not found";
