@@ -21,11 +21,11 @@ sub new {
   my $match;
 
   my $self = bless {
-    routes     => [],      # routes in insertion order
-    name_index => {},      # route name => route
-    path_index => {},      # route path => list of all routes using it
-    match      => \$match, # route index of last match
-    error      => undef,   # status code of last match
+    routes      => [],      # routes in insertion order, grouped by path
+    route_index => {},      # path => route index of group in above routes[]
+    name_index  => {},      # route name => route
+    match       => \$match, # route index of last match
+    error       => undef,   # status code of last match
   }, $class;
 
   return $self;
@@ -169,13 +169,15 @@ sub add {
   my $path = shift // croak 'no route path supplied';
   my %args = $self->_args(@_);
 
-  $args{payload} or croak 'no payload defined';
+  delete $self->{regex}; # force recompile
 
+  $args{payload} or croak 'no payload defined';
   croak "route '$name' already defined" if $self->{name_index}{ $name };
+
   (my $methods, $path) = $self->_split_route_path($path);
   my @methods = $self->_methods($args{methods}, $methods);
 
-  delete $self->{regex}; # force recompile
+  my $index = $self->{route_index}{ $path } //= @{ $self->{routes} };
 
   my ($route, $regex) = $self->_build_route($path, \%args);
 
@@ -183,17 +185,17 @@ sub add {
     name    => $name,
     path    => $path,
     route   => $route,
+    index   => $index,
     regex   => $regex,
     methods => \@methods,
     payload => $args{payload},
   };
 
   #use Data::Dumper;
-  #warn "Added route: ", Dumper($_), "\n";
+  #warn "Added route '$name' with index '$index': ", Dumper($_), "\n";
 
-  push @{ $self->{routes} }, $_;
+  push @{ $self->{routes}[ $index ] ||= [] }, $_;
   $self->{name_index}{ $name } = $_;
-  push @{ $self->{path_index}{ $path } ||= [] }, $_;
 
   return $self;
 }
@@ -207,15 +209,11 @@ sub _compile {
 
   my $match = $self->{match};
 
-  # assign position index, for convience
-  for (my $i = 0; $i < @routes; $i++) {
-    $routes[$i]{pos} = $i;
-  }
-
   # Tested faster to terminate each route with \z rather than placing
   # at end of combined regex.
   my $regex = join '|',
-    map { "(?: $_->{regex} \\z (?{ \$\$match = $_->{pos} }))" }
+    map { "(?: $_->{regex} \\z (?{ \$\$match = $_->{index} }))" }
+    map { $_->[0] } # unique route paths
     @routes
   ;
 
@@ -238,19 +236,30 @@ sub match {
 
   $path =~ /$regex/ or return $self->error(404);
 
-  # The regex above set the index of the matching route on success
-  my $route = $self->{routes}[ $$match ]
+  # The regex above set the index of the matching route group on success
+  my $routes = $self->{routes}[ $$match ]
     or croak "no route defined for match index '$$match'?!";
 
+  my $matched_route;
+
   if ($method) {
-    my $allow = $route->{methods};
-    if (@$allow) {
-      any { uc $method eq $_ } @$allow or return $self->error(405);
+    foreach (@$routes) {
+      my $allowed = $_->{methods};
+      if (@$allowed) {
+        $matched_route = $_ if any { uc $method eq $_ } @$allowed;
+      } else { # no allowed means any method is accepted
+        $matched_route = $_;
+      }
+      last if $matched_route;
     }
+  } else {
+    $matched_route = $routes->[0];
   }
 
+  $matched_route or return $self->error(405);
+
   # XXX Most of the time is related to copying the %+ hash; faster way?
-  return { %{ $route->{payload} }, %+ };
+  return { %{ $matched_route->{payload} }, %+ };
 }
 
 
@@ -322,14 +331,14 @@ sub with {
 sub allowed_methods {
   my $self = shift;
 
-  my $idx = ${ $self->{match} };
-  defined $idx or return;
+  my $index = ${ $self->{match} };
+  defined $index or return;
 
-  my $route = $self->{routes}[ $idx ]
-    or croak "no route found for idx '$idx'?!";
+  my $routes = $self->{routes}[ $index ]
+    or croak "no routes found for index '$index'?!";
 
-  my $allow = $route->{methods};
-  return wantarray ? @$allow : [ @$allow ];
+  my $allowed = $self->_methods(map { $_->{methods} } @$routes);
+  return wantarray ? @$allowed : $allowed;
 }
 
 
@@ -339,7 +348,7 @@ sub as_string {
   my @routes;
   my $max_name_len   = 0;
   my $max_method_len = 0;
-  foreach (@{ $self->{routes} }) {
+  foreach (map { @$_ } @{ $self->{routes} }) {
     my $methods = join ',', @{ $_->{methods} };
 
     $max_name_len   = max($max_name_len, length $_->{name});
