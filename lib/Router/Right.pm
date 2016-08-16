@@ -181,11 +181,11 @@ sub add {
 
   local $_ = {
     name    => $name,
+    path    => $path,
     route   => $route,
     regex   => $regex,
     methods => \@methods,
     payload => $args{payload},
-    source  => $path,
   };
 
   #use Data::Dumper;
@@ -345,7 +345,7 @@ sub as_string {
     $max_name_len   = max($max_name_len, length $_->{name});
     $max_method_len = max($max_method_len, length $methods);
 
-    push @routes, [ $_->{name}, $methods || '*', $_->{source} ];
+    push @routes, [ $_->{name}, $methods || '*', $_->{path} ];
   }
 
   my $str = '';
