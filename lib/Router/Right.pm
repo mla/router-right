@@ -435,10 +435,6 @@ __END__
 
 =encoding utf8
 
-=head1 NAME
-
-Router::Right - Fast, framework-agnostic URL routing engine for web applications
-
 =head1 SYNOPSIS
 
   use Router::Right;
@@ -465,8 +461,8 @@ Router::Right - Fast, framework-agnostic URL routing engine for web applications
 
 =head1 DESCRIPTION
 
-Router::Right is a framework-agnostic routing engine used to map web
-application request URLs to application handlers.
+Router::Right is a Perl-based, framework-agnostic routing engine used to
+map web application request URLs to application handlers.
 
 =head1 METHODS
 
