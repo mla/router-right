@@ -480,12 +480,12 @@ Returns a new Router::Right instance
 
 Define a route. $name is used to reference the route elsewhere.
 On a successful match, the payload hash reference is returned; its contents are
-completely user-defined and can contain anything.
+completely user-defined and may contain anything.
 
 See the ROUTE DEFINITION section for details on how $route_path values are
 specified.
 
-As a convience, the payload field name may be omitted. i.e., 
+As a convenience, the payload field name may be omitted. i.e., 
 add($name => $route_path, \%payload)
 
 =item match($url [, $method])
@@ -498,7 +498,7 @@ is returned and the error() method can be checked to see why the match
 failed.
 
 $method, if supplied, is the HTTP method of the request
-(e.g., GET, POST, PUT, DELETE). Specifying $method may prevent a route
+(e.g., GET, POST, etc.). Specifying $method may prevent a route
 from otherwise matching if the route was defined with a restricted set of allowed
 methods (see ROUTE DEFINITION). By default, all request methods are allowed.
 
@@ -515,15 +515,15 @@ that are allowed by the route.
 
 =item allowed_methods()
 
-Returns a list of the methods allowed by the last matched route. Returns a list in array context
-and an array reference in scalar context.
+Returns the methods allowed by the last matched route.
+Returns a list in array context and an array reference in scalar context.
 
 An empty list indicates that all methods are accepted.
 
 =item url($name [, %params])
 
-Constructs a URL from the $name route. Placeholder values are supplied as %params. Unknown placeholder
-values are appended as query string parameters.
+Constructs a URL from the $name route. Placeholder values are supplied as
+%params. Unknown placeholder values are appended as query string parameters.
 
 Example:
 
@@ -532,20 +532,14 @@ Example:
 
 The return value is a L<URI> instance.
 
-Placeholder values are required unless the route supplied defaults. For example:
-
-  $r->add(entry => '/entries/{year}', { controller => 'Entry' }, year => '1916');
-  $r->url('entry', year => '1921'); # produces /entries/1921
-  $r->url('entry');                 # produces /entries/1916
-
 =item as_string()
 
-Returns a report of the defined methods, in order of definition.
+Returns a report of the defined routes, in order of definition.
 
 =item with($name => $route_path [, %options])
 
-Helper method to prevent code duplication. Allows route information to be shared
-across multiple routes. For example:
+Helper method to prevent code duplication. Allows route information to be
+shared across multiple routes. For example:
 
   $r->with(admin => '/admin',        { controller => 'Admin' })
     ->add(users  => '/users',        { action => 'users' })
@@ -580,7 +574,8 @@ A callback is accepted, which allows chaining with() calls:
   #   admin_log            * /admin/log
   #   admin_dashboard_view * /admin/dashboard/{action}
 
-$_ is set to the router instance within the callback function. It is also supplied as a parameter.
+Within the callback function, $_ is set to the router instance.
+It is also supplied as a parameter.
 
 =back
 
@@ -591,18 +586,20 @@ For example:
 
   $r->add(entries => '/entries/{year}/{month}');
 
-defines a route path containing two placeholders, "year" and "month'. By default, a placeholder
-matches any string up to the next forward slash.
+defines a route path containing two placeholders, "year" and "month'.
+By default, a placeholder matches any string up to the next forward slash.
 
 Placeholder names must not begin with a number, nor contain hyphens.
-The default regular expression may be overridden. For example:
+
+The default match rule may be overridden. For example:
 
   $r->add(entries => '/entries/{year:\d+}/{month:\d+}');
 
-is the same as above, except it will only match if both the year and month contain only digits.
+is the same as above, except it will only match if both the year and month
+contain only digits.
 
-The special {.format} placeholder can be used to allow an optional file extension to be added.
-For example:
+The special {.format} placeholder can be used to allow an optional file
+extension to be added. For example:
 
   $r->add(download => '/dl/{file}{.format}', { controller => 'Download' });
   $r->match('/dl/foo.gz'); # returns { controller => 'Download', file => 'foo', format => 'gz' }
@@ -613,9 +610,10 @@ For example:
 
 =head1 SEE ALSO
 
-Router::Right is based on Tokuhiro Matsuno's Router::Simple and Router::Boom modules.
+Router::Right is based on Tokuhiro Matsuno's Router::Simple and
+Router::Boom modules.
 
-Python's Routes module
+Python's Routes module:
 L<https://routes.readthedocs.io/en/latest/index.html>
 
 =cut
