@@ -190,4 +190,4 @@ This software is copyright (c) 2016 by Maurice Aubrey.
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
-[![Build Status](https://travis-ci.org/mla/router-right?branch=master)](https://travis-ci.org/mla/router-right)
+[![Build Status](https://travis-ci.org/mla/router-right.svg?branch=master)](https://travis-ci.org/mla/router-right)
