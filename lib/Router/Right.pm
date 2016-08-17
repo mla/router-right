@@ -137,7 +137,6 @@ sub _build_route {
         $pre = '\\.';
         $type = '.';
       } else {
-        $optional = exists $args->{ $pname } ? 1 : 0;
         $regex = '[^/]+?' unless length $regex;
       }
 
@@ -270,12 +269,9 @@ sub url {
   my $name = shift or croak 'no url name supplied';
   my %args = @_;
 
-  my $route_args = {};
-
   my @route;
   if (my $route = $self->{name_index}{ $name }) {
     @route = @{ $route->{route} };    
-    $route_args = $route->{args};
   } elsif ($name =~ m{^/}) { # url, not a route name
     if ($name =~ /{/) { # has placeholders? if so, need to parse it
       my ($route, $regex) = $self->_build_route($name, {});
@@ -296,16 +292,13 @@ sub url {
     }
 
     my $pname = $_->{pname};
-    my $pval  = delete $args{ $pname };
 
-    unless (defined $pval) {
+    unless (exists $args{ $pname }) {
       $_->{optional}
         or croak "required param '$pname' missing from url '$name'";
-      $pval = $route_args->{ $pname };
-      defined $pval or next;
     }
 
-    $pval //= '';
+    my $pval = delete($args{ $pname }) // '';
     $pval =~ /$_->{regex}/
       or croak "invalid value for param '$pname' in url '$name': '$pval'";
 
