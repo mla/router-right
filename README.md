@@ -32,12 +32,8 @@ version 0.01
 
 # DESCRIPTION
 
-Router::Right is a framework-agnostic routing engine used to map web
-application request URLs to application handlers.
-
-# NAME
-
-Router::Right - Fast, framework-agnostic URL routing engine for web applications
+Router::Right is a Perl-based, framework-agnostic routing engine used to
+map web application request URLs to application handlers.
 
 # METHODS
 
@@ -194,4 +190,4 @@ This software is copyright (c) 2016 by Maurice Aubrey.
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
-[![Build Status](https://travis-ci.org/mla/time-ago.svg?branch=master)](https://travis-ci.org/mla/time-ago)
+[![Build Status](https://travis-ci.org/mla/router-right?branch=master)](https://travis-ci.org/mla/router-right)

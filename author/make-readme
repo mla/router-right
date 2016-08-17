@@ -12,5 +12,5 @@ pod2markdown < Router-Right-*/lib/Router/Right.pm > $readme
 
 cat << EOT >> $readme
 
-[![Build Status](https://travis-ci.org/mla/time-ago.svg?branch=master)](https://travis-ci.org/mla/time-ago)
+[![Build Status](https://travis-ci.org/mla/router-right?branch=master)](https://travis-ci.org/mla/router-right)
 EOT
