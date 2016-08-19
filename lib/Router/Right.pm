@@ -268,7 +268,7 @@ sub match {
   $matched_route or return $self->error(405);
 
   # XXX Most of the time is related to copying the %+ hash; faster way?
-  # return { %{ $matched_route->{payload} } };
+  #return { %{ $matched_route->{payload} } };
   return { %{ $matched_route->{payload} }, %+ };
 }
 
@@ -631,7 +631,7 @@ The special {.format} placeholder can be used to allow an optional file extensio
 
 Router::Right is based on Tokuhiro Matsuno's Router::Simple and Router::Boom modules.
 
-Python's Routes module:
+This module seeks to implement most features of Python's Routes module:
 L<https://routes.readthedocs.io/en/latest/index.html>
 
 =cut
