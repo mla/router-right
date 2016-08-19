@@ -580,9 +580,7 @@ Helper method to prevent code duplication. Allows route information to be shared
   #   admin_users * /admin/users
   #   admin_trx   * /admin/transactions
 
-The payload contents are merged. The route names are joined by an underscore. The paths are simply concatenated.
-
-Either or both of $name and $route_path may be undefined.
+The payload contents are merged. The route names are joined by an underscore. The paths are simply concatenated. Either or both of $name and $route_path may be undefined.
 
 A callback is accepted, which allows chaining with() calls:
 
