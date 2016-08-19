@@ -48,7 +48,7 @@ sub _route {
 
 
 # Given a route path, returns the associated route group index
-sub _path_index {
+sub _group_index {
   my $self = shift;
   my $path = shift or croak 'no route path supplied';
 
@@ -184,7 +184,7 @@ sub add {
   (my $methods, $path) = $self->_split_route_path($path);
   my @methods = $self->_methods($args{methods}, $methods);
 
-  my $index = $self->_path_index($path);
+  my $index = $self->_group_index($path);
 
   my ($route, $regex) = $self->_build_route($path, \%args);
 
@@ -339,7 +339,13 @@ sub with {
 sub allowed_methods {
   my $self = shift;
 
-  my $index = ${ $self->{match} };
+  my $index;
+  if (@_) {
+    my $path = shift or return;
+    $index = $self->{routes_index}{ $path };
+  } else {
+    $index = ${ $self->{match} };
+  }
   defined $index or return;
 
   my $routes = $self->{routes}[ $index ]
