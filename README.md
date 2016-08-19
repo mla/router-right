@@ -83,6 +83,9 @@ map web application request URLs to application handlers.
 
     A 405 result indicates a match was found, but the request method was not allowed. allowed\_methods() can be called to obtain a list of the methods that are permitted for the route.
 
+    The above error codes are also available as symbolic names through the NOT\_FOUND and
+    METHOD\_NOT\_ALLOWED methods.
+
 - allowed\_methods(\[ $name \])
 
     Returns the list of allowed methods for a given route name or path. In list context, returns a list. In scalar context, returns an array reference. An empty list/array indicates that all methods are
