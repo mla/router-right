@@ -544,8 +544,8 @@ Returns the error code of the last failed match.
 
 A 405 result indicates a match was found, but the request method was not allowed. allowed_methods() can be called to obtain a list of the methods that are permitted for the route.
 
-The above error codes are also available as symbolic names through the NOT_FOUND and
-METHOD_NOT_ALLOWED methods.
+The above error codes are also available as symbolic constants through the NOT_FOUND and
+METHOD_NOT_ALLOWED functions.
 
 =item allowed_methods([ $name ])
 
