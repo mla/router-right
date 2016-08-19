@@ -631,7 +631,7 @@ The special {.format} placeholder can be used to allow an optional file extensio
 
 Router::Right is based on Tokuhiro Matsuno's Router::Simple and Router::Boom modules.
 
-This module seeks to implement most features of Python's Routes module:
+This module seeks to implement most features of Python's Routes:
 L<https://routes.readthedocs.io/en/latest/index.html>
 
 =cut
