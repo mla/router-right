@@ -19,6 +19,7 @@ our @EXPORT_OK = qw/ NOT_FOUND METHOD_NOT_ALLOWED /;
 sub NOT_FOUND          () { 404 }
 sub METHOD_NOT_ALLOWED () { 405 }
 
+
 sub new {
   my $class = shift;
 
@@ -100,6 +101,8 @@ sub _args {
 }
 
 
+# Given a route path, splits off the allowed methods prefix, if any.
+# See ROUTE DEFINTION in the POD.
 sub _split_route_path {
   my $self = shift;
   my $path = shift or croak 'no route path supplied';
