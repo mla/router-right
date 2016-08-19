@@ -10,7 +10,7 @@ use List::MoreUtils qw/ any uniq /;
 use URI;
 use URI::QueryParam;
 
-our $VERSION = 0.01;
+our $VERSION = 0.02;
 
 sub new {
   my $class = shift;
