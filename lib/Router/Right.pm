@@ -246,7 +246,7 @@ sub match {
   $$match = undef;
   $self->{error} = undef;
 
-  $path =~ /$regex/ or return $self->error(404);
+  $path =~ /$regex/ or return $self->error(NOT_FOUND);
 
   # The regex above set the index of the matching route group on success
   my $routes = $self->{routes}[ $$match ]
@@ -268,7 +268,7 @@ sub match {
     $matched_route = $routes->[0];
   }
 
-  $matched_route or return $self->error(405);
+  $matched_route or return $self->error(METHOD_NOT_ALLOWED);
 
   # XXX Most of the time is related to copying the %+ hash; faster way?
   #return { %{ $matched_route->{payload} } };
@@ -539,6 +539,9 @@ Returns the error code of the last failed match.
   405 = method not allowed
 
 A 405 result indicates a match was found, but the request method was not allowed. allowed_methods() can be called to obtain a list of the methods that are permitted for the route.
+
+The above error codes are also available as symbolic names through the NOT_FOUND and
+METHOD_NOT_ALLOWED methods.
 
 =item allowed_methods([ $name ])
 
