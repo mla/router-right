@@ -12,6 +12,9 @@ use URI::QueryParam;
 
 our $VERSION = 0.02;
 
+sub NOT_FOUND          () { 404 }
+sub METHOD_NOT_ALLOWED () { 405 }
+
 sub new {
   my $class = shift;
 
