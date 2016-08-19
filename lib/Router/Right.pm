@@ -12,6 +12,10 @@ use URI::QueryParam;
 
 our $VERSION = 0.02;
 
+use parent qw/ Exporter /;
+
+our @EXPORT_OK = qw/ NOT_FOUND METHOD_NOT_ALLOWED /;
+
 sub NOT_FOUND          () { 404 }
 sub METHOD_NOT_ALLOWED () { 405 }
 
