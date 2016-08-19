@@ -126,9 +126,7 @@ map web application request URLs to application handlers.
         #   admin_users * /admin/users
         #   admin_trx   * /admin/transactions
 
-    The payload contents are merged. The route names are joined by an underscore. The paths are simply concatenated.
-
-    Either or both of $name and $route\_path may be undefined.
+    The payload contents are merged. The route names are joined by an underscore. The paths are simply concatenated. Either or both of $name and $route\_path may be undefined.
 
     A callback is accepted, which allows chaining with() calls:
 
