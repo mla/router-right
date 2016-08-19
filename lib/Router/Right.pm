@@ -3,6 +3,7 @@ package Router::Right;
 
 use strict;
 use warnings;
+use 5.10.0; # named captures, see perlver
 use Carp;
 use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
@@ -10,8 +11,6 @@ use URI;
 use URI::QueryParam;
 
 our $VERSION = 0.01;
-
-require 5.10.0; # for named captures
 
 sub new {
   my $class = shift;
@@ -228,7 +227,7 @@ sub _compile {
 
   # warn "Regex: $regex\n";
   use re 'eval';
-  return qr/\A (?: $regex )/xu;
+  return qr/\A (?: $regex )/x;
 }
 
 
