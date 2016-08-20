@@ -3,15 +3,22 @@ package Router::Right;
 
 use strict;
 use warnings;
+use 5.10.0; # named captures, see perlver
 use Carp;
 use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
 use URI;
 use URI::QueryParam;
 
-our $VERSION = 0.01;
+our $VERSION = 0.02;
 
-require 5.10.0; # for named captures
+use parent qw/ Exporter /;
+
+our @EXPORT_OK = qw/ NOT_FOUND METHOD_NOT_ALLOWED /;
+
+sub NOT_FOUND          () { 404 }
+sub METHOD_NOT_ALLOWED () { 405 }
+
 
 sub new {
   my $class = shift;
@@ -45,6 +52,15 @@ sub _route {
   my $name = shift or croak 'no name supplied';
 
   return $self->{name_index}{ $name };
+}
+
+
+# Given a route path, returns the associated route group index
+sub _group_index {
+  my $self = shift;
+  my $path = shift or croak 'no route path supplied';
+
+  return $self->{route_index}{ $path } //= @{ $self->{routes} };
 }
 
 
@@ -85,6 +101,8 @@ sub _args {
 }
 
 
+# Given a route path, splits off the allowed methods prefix, if any.
+# See ROUTE DEFINTION in the POD.
 sub _split_route_path {
   my $self = shift;
   my $path = shift or croak 'no route path supplied';
@@ -125,6 +143,7 @@ sub _build_route {
     if ($is_placeholder) {
       /^([^:]+):?(.*)$/ or croak "invalid placeholder '$_'";
       my ($pname, $regex) = ($1, $2);
+      croak "invalid placeholder name '$pname'" if $pname =~ m{/};
 
       my $optional = 0;
       my $pre = '';  # match before placeholder content
@@ -176,7 +195,7 @@ sub add {
   (my $methods, $path) = $self->_split_route_path($path);
   my @methods = $self->_methods($args{methods}, $methods);
 
-  my $index = $self->{route_index}{ $path } //= @{ $self->{routes} };
+  my $index = $self->_group_index($path);
 
   my ($route, $regex) = $self->_build_route($path, \%args);
 
@@ -219,7 +238,7 @@ sub _compile {
 
   # warn "Regex: $regex\n";
   use re 'eval';
-  return qr/\A (?: $regex )/xu;
+  return qr/\A (?: $regex )/x;
 }
 
 
@@ -234,7 +253,7 @@ sub match {
   $$match = undef;
   $self->{error} = undef;
 
-  $path =~ /$regex/ or return $self->error(404);
+  $path =~ /$regex/ or return $self->error(NOT_FOUND);
 
   # The regex above set the index of the matching route group on success
   my $routes = $self->{routes}[ $$match ]
@@ -256,10 +275,10 @@ sub match {
     $matched_route = $routes->[0];
   }
 
-  $matched_route or return $self->error(405);
+  $matched_route or return $self->error(METHOD_NOT_ALLOWED);
 
   # XXX Most of the time is related to copying the %+ hash; faster way?
-  # return { %{ $matched_route->{payload} } };
+  #return { %{ $matched_route->{payload} } };
   return { %{ $matched_route->{payload} }, %+ };
 }
 
@@ -331,7 +350,21 @@ sub with {
 sub allowed_methods {
   my $self = shift;
 
-  my $index = ${ $self->{match} };
+  my $index;
+  if (@_) {
+    my $path;
+    if ($_[0] !~ m{/}) { # route name, not path
+      my $name = shift;
+      my $route = $self->{name_index}{ $name } or return;
+      $path = $route->{path};
+    } else {
+      $path = shift;
+    }
+
+    $index = $self->{route_index}{ $path };
+  } else {
+    $index = ${ $self->{match} };
+  }
   defined $index or return;
 
   my $routes = $self->{routes}[ $index ]
@@ -474,29 +507,36 @@ Returns a new Router::Right instance
 
 =item add($name => $route_path, payload => \%payload [, %options])
 
-Define a route. $name is used to reference the route elsewhere.
-On a successful match, the payload hash reference is returned; its contents are
-completely user-defined and may contain anything.
+Define a route. $name is used to reference the route elsewhere. On a successful match, the payload hash reference is returned; its contents are completely user-defined and may contain anything. For example:
 
-See the ROUTE DEFINITION section for details on how $route_path values are
-specified.
+  $r->add(entries => '/entries', payload => { controller => 'Entries' })
 
-As a convenience, the payload field name may be omitted. i.e., 
-add($name => $route_path, \%payload)
+See the ROUTE DEFINITION section for details on how $route_path values are specified.
+As a convenience, the payload field name may be omitted. i.e.,
+
+  add($name => $route_path, \%payload)
+
+By default, routes match any HTTP request method (e.g., GET, POST). To restrict them, supply a "methods" option. e.g.,
+
+  $r->add(entries => '/entries', { controller => 'Entries' }, methods => 'GET')
+
+That would only match GET requests. The value may be either a string or an array reference of
+strings. e.g.,
+
+  $r->add(entries => '/entries', { controller => 'Entries' }, methods => [qw/ GET POST /])
+
+Method strings are case-insensitive. As a convenience, the allowed methods can also be specified
+as part of the route path itself. e.g.,
+
+  $r->add(entries => 'GET|POST /entries', { controller => 'Entries' })
 
 =item match($url [, $method])
 
-Attempts to find a route that matches the supplied $url. Routes are
-matched in the order defined.
+Attempts to find a route that matches the supplied $url. Routes are matched in the order defined.
 
-If a match is found, its associated payload is returned. If not, undef
-is returned and the error() method can be checked to see why the match
-failed.
+If a match is found, its associated payload is returned. If not, undef is returned and the error() method will indicate why the match failed.
 
-$method, if supplied, is the HTTP method of the request
-(e.g., GET, POST, etc.). Specifying $method may prevent a route
-from otherwise matching if the route was defined with a restricted set of allowed
-methods (see ROUTE DEFINITION). By default, all request methods are allowed.
+$method, if supplied, is the HTTP method of the request (e.g., GET, POST, etc.). Specifying $method may prevent a route from otherwise matching if the route was defined with a restricted set of allowed methods (see ROUTE DEFINITION). By default, all request methods are allowed.
 
 =item error()
 
@@ -505,21 +545,26 @@ Returns the error code of the last failed match.
   404 = no match found
   405 = method not allowed
 
-A 405 result indicates a match was found, but the request method was
-not allowed. allowed_methods() can be called to obtain a list of the methods
-that are allowed by the route.
+A 405 result indicates a match was found, but the request method was not allowed. allowed_methods() can be called to obtain a list of the methods that are permitted for the route.
 
-=item allowed_methods()
+The above error codes are also available as symbolic constants through the NOT_FOUND and
+METHOD_NOT_ALLOWED functions.
 
-Returns the methods allowed by the last matched route.
-Returns a list in array context and an array reference in scalar context.
+=item allowed_methods([ $name ])
 
-An empty list indicates that all methods are accepted.
+Returns the list of allowed methods for a given route name or path. In list context, returns a list. In scalar context, returns an array reference. An empty list/array indicates that all methods are
+permitted.
+
+If route $name is supplied, returns its permitted methods. Returns undef in scalar context if the route is unknown. If $name contains a forward slash, it's intepreted as a route path, instead.
+
+With no argument, returns the methods permitted by the last match() attempt. Returns undef in scalar context if there was no prior match.
+
+  $r->add(entries => 'PUT|GET /entries', { controller => 'Entries' });
+  print join(', ', $r->allowed_methods('entries')), "\n"; # prints GET, PUT
 
 =item url($name [, %params])
 
-Constructs a URL from the $name route. Placeholder values are supplied as
-%params. Unknown placeholder values are appended as query string parameters.
+Constructs a URL from the $name route. Placeholder values are supplied as %params. Unknown placeholder values are appended as query string parameters.
 
 Example:
 
@@ -534,8 +579,7 @@ Returns a report of the defined routes, in order of definition.
 
 =item with($name => $route_path [, %options])
 
-Helper method to prevent code duplication. Allows route information to be
-shared across multiple routes. For example:
+Helper method to prevent code duplication. Allows route information to be shared across multiple routes. For example:
 
   $r->with(admin => '/admin',        { controller => 'Admin' })
     ->add(users  => '/users',        { action => 'users' })
@@ -549,10 +593,7 @@ shared across multiple routes. For example:
   #   admin_users * /admin/users
   #   admin_trx   * /admin/transactions
 
-The payload contents are merged. The route names are joined by an underscore.
-The paths are simply concatenated.
-
-Either or both of $name and $route_path may be undefined.
+The payload contents are merged. The route names are joined by an underscore. The paths are simply concatenated. Either or both of $name and $route_path may be undefined.
 
 A callback is accepted, which allows chaining with() calls:
 
@@ -570,32 +611,27 @@ A callback is accepted, which allows chaining with() calls:
   #   admin_log            * /admin/log
   #   admin_dashboard_view * /admin/dashboard/{action}
 
-Within the callback function, $_ is set to the router instance.
-It is also supplied as a parameter.
+Within the callback function, $_ is set to the router instance. It is also supplied as a parameter.
 
 =back
 
 =head1 ROUTE DEFINITION
 
-A route path is a normal URL path with the addition of placeholder variables.
-For example:
+A route path is a normal URL path with the addition of placeholder variables. For example:
 
   $r->add(entries => '/entries/{year}/{month}');
 
-defines a route path containing two placeholders, "year" and "month'.
-By default, a placeholder matches any string up to the next forward slash.
+defines a route path containing two placeholders, "year" and "month'. By default, a placeholder matches any string up to the next forward slash.
 
-Placeholder names must not begin with a number, nor contain hyphens.
+Placeholder names must not begin with a number, nor contain hyphens or forward slashes.
 
 The default match rule may be overridden. For example:
 
   $r->add(entries => '/entries/{year:\d+}/{month:\d+}');
 
-is the same as above, except it will only match if both the year and month
-contain only digits.
+is the same as above, except it will only match if both the year and month contain only digits.
 
-The special {.format} placeholder can be used to allow an optional file
-extension to be added. For example:
+The special {.format} placeholder can be used to allow an optional file extension to be appended. For example:
 
   $r->add(download => '/dl/{file}{.format}', { controller => 'Download' });
   $r->match('/dl/foo.gz'); # returns { controller => 'Download', file => 'foo', format => 'gz' }
@@ -606,10 +642,9 @@ extension to be added. For example:
 
 =head1 SEE ALSO
 
-Router::Right is based on Tokuhiro Matsuno's Router::Simple and
-Router::Boom modules.
+Router::Right is based on Tokuhiro Matsuno's Router::Simple and Router::Boom modules.
 
-Python's Routes module:
+This module seeks to implement most features of Python's Routes:
 L<https://routes.readthedocs.io/en/latest/index.html>
 
 =cut

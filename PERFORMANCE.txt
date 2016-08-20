@@ -1,0 +1,21 @@
+This module is ~ 3x faster than Router::Simple, but slower than ::Boom according to the
+author/benchmark.pl script.
+
+                         Rate Router::Simple Router::Right Router::Boom::Method Router::Boom
+Router::Simple        31164/s             --          -75%                 -84%         -88%
+Router::Right        122530/s           293%            --                 -36%         -52%
+Router::Boom::Method 191145/s           513%           56%                   --         -25%
+Router::Boom         254485/s           717%          108%                  33%           --
+
+Much of the slow down is due to the use of named captures for the placeholder matching,
+and in particular, the copying of the %+ named capture hash for use in the payload.
+
+If that copying is elimated, performance improves dramatically:
+
+                         Rate Router::Simple Router::Boom::Method Router::Boom Router::Right
+Router::Simple        30896/s             --                 -83%         -88%          -90%
+Router::Boom::Method 186990/s           505%                   --         -30%          -38%
+Router::Boom         267963/s           767%                  43%           --          -10%
+Router::Right        299185/s           868%                  60%          12%            --
+
+This is an area to optimize if performance becomes an issue. 
