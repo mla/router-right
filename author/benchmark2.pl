@@ -1,5 +1,10 @@
 #!/usr/bin/env perl
 
+# Usage: $0 [num-routes]
+
+# Adds routes of varying lengths with and without placeholders
+# to give an idea of how performance scales.
+
 use strict;
 use warnings;
 use lib 'lib', '../lib';
