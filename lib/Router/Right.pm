@@ -398,6 +398,12 @@ sub as_string {
 }
 
 
+sub resource {
+  my $self = shift;
+
+}
+
+
 package Router::Right::Submapper;
 
 use strict;
