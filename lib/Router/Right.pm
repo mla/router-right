@@ -603,7 +603,7 @@ __END__
 
 =head1 DESCRIPTION
 
-Router::Right is a Perl-based, framework-agnostic routing engine used to
+Router::Right is a Perl5-based, framework-agnostic routing engine used to
 map web application request URLs to application handlers.
 
 =head1 METHODS
