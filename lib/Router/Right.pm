@@ -5,6 +5,7 @@ use strict;
 use warnings;
 use 5.10.0; # named captures, see perlver
 use Carp;
+use Lingua::EN::Inflect qw/ PL_N /;
 use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
 use URI;
@@ -190,7 +191,7 @@ sub add {
   delete $self->{regex}; # force recompile
 
   my $payload = delete $args{payload} or croak 'no payload defined';
-  croak "route '$name' already defined" if $self->{name_index}{ $name };
+  warn "route '$name' already defined" if $self->{name_index}{ $name };
 
   (my $methods, $path) = $self->_split_route_path($path);
   my @methods = $self->_methods($args{methods}, $methods);
@@ -398,9 +399,101 @@ sub as_string {
 }
 
 
+sub _name_to_controller {
+  my $class = shift;
+  my $name  = shift // croak 'no name supplied';
+
+  $name = lc $name;
+  $name =~ s/[-_\s]+/_/g;
+  $name =~ s/(^|_)(.)/$1 ? "::\U$2" : "\U$2"/gxe;
+
+  return $name;
+}
+
+
+sub _resource_payload_builder {
+  my $self = shift;
+  my $payload  = shift or croak 'no payload supplied';
+  my $singular = shift or croak 'no singular member name supplied';
+  my $plural   = shift or croak 'no plural collection name supplied';
+  
+  return sub {
+    my $controller = shift;
+    my $action     = shift;
+
+    return {
+      controller => $self->_name_to_controller($plural),
+      action     => $action,
+      %$payload,
+    };
+  };
+}
+
+
 sub resource {
   my $self = shift;
+  my %args = (@_ % 2 ? (singular => @_) : @_);
+ 
+  my $singular = $args{singular} or croak 'no resource member name supplied';
+  my $plural   = $args{plural}  // PL_N($singular);
+  my $payload  = $args{payload} // {};
 
+  my $builder = $self->_resource_payload_builder($payload, $singular, $plural);
+
+  $self->add(
+    $plural => "POST /$plural",
+    $builder->('create'),
+  );
+
+  $self->add(
+    $plural => "GET /$plural\{.format}",
+    $builder->('index'),
+  );
+
+  $self->add(
+    "formatted_$plural" => "GET /$plural.{format}",
+    $builder->('index'),
+  );
+
+  $self->add(
+    "new_$singular" => "GET /$plural/new{.format}",
+    $builder->('new'),
+  );
+
+  $self->add(
+    "formatted_new_$singular" => "GET /$plural/new.{format}",
+    $builder->('new'),
+  );
+
+  $self->add(
+    $singular => "GET /$plural/{id}{.format}",
+    $builder->('show'),
+  );
+
+  $self->add(
+    $singular => "PUT /$plural/{id}{.format}",
+    $builder->('update'),
+  );
+
+  $self->add(
+    $singular => "DELETE /$plural/{id}{.format}",
+    $builder->('delete'),
+  );
+
+  $self->add(
+    "formatted_$singular" => "GET /$plural/{id}.{format}",
+    $builder->('show'),
+  );
+
+  $self->add(
+    "edit_$singular" => "GET /$plural/{id}{.format}/edit",
+    $builder->('edit'),
+  );
+
+  $self->add(
+    "formatted_edit_$singular" => "GET /$plural/{id}.{format}/edit",
+    $builder->('edit'),
+  );
 }
 
 
