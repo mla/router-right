@@ -191,7 +191,9 @@ sub add {
   delete $self->{regex}; # force recompile
 
   my $payload = delete $args{payload} or croak 'no payload defined';
-  warn "route '$name' already defined" if $self->{name_index}{ $name };
+  if (defined $name && $self->{name_index}{ $name }) {
+    croak "route '$name' already defined";
+  }
 
   (my $methods, $path) = $self->_split_route_path($path);
   my @methods = $self->_methods($args{methods}, $methods);
@@ -215,7 +217,7 @@ sub add {
   #warn "Added route '$name' with index '$index': ", Dumper($_), "\n";
 
   push @{ $self->{routes}[ $index ] ||= [] }, $_;
-  $self->{name_index}{ $name } = $_;
+  $self->{name_index}{ $name } = $_ if defined $name;
 
   return $self;
 }
@@ -383,12 +385,13 @@ sub as_string {
   my $max_name_len   = 0;
   my $max_method_len = 0;
   foreach (map { @$_ } @{ $self->{routes} }) {
+    my $name    = $_->{name} // '';
     my $methods = join ',', @{ $_->{methods} };
 
-    $max_name_len   = max($max_name_len, length $_->{name});
+    $max_name_len   = max($max_name_len, length $name);
     $max_method_len = max($max_method_len, length $methods);
 
-    push @routes, [ $_->{name}, $methods || '*', $_->{path} ];
+    push @routes, [ $name, $methods || '*', $_->{path} ];
   }
 
   my $str = '';
@@ -411,18 +414,18 @@ sub _name_to_controller {
 }
 
 
-sub _resource_payload_builder {
+sub _build_resource_payload {
   my $self = shift;
-  my $payload  = shift or croak 'no payload supplied';
-  my $singular = shift or croak 'no singular member name supplied';
-  my $plural   = shift or croak 'no plural collection name supplied';
-  
+  my $payload    = shift or croak 'no payload supplied';
+  my $singular   = shift or croak 'no singular member name supplied';
+  my $plural     = shift or croak 'no plural collection name supplied';
+  my $controller = shift // $self->_name_to_controller($plural);
+
   return sub {
-    my $controller = shift;
-    my $action     = shift;
+    my $action = shift;
 
     return {
-      controller => $self->_name_to_controller($plural),
+      controller => $controller,
       action     => $action,
       %$payload,
     };
@@ -434,20 +437,27 @@ sub resource {
   my $self = shift;
   my %args = (@_ % 2 ? (singular => @_) : @_);
  
-  my $singular = $args{singular} or croak 'no resource member name supplied';
-  my $plural   = $args{plural}  // PL_N($singular);
-  my $payload  = $args{payload} // {};
+  my $singular   = $args{singular} or croak 'no resource member name supplied';
+  my $plural     = $args{plural}  // PL_N($singular);
+  my $payload    = $args{payload} // {};
 
-  my $builder = $self->_resource_payload_builder($payload, $singular, $plural);
-
-  $self->add(
-    $plural => "POST /$plural",
-    $builder->('create'),
+  my $builder = $self->_build_resource_payload(
+    $payload,
+    $singular,
+    $plural,
+    $args{controller},
   );
+
+  my $undef = undef;
 
   $self->add(
     $plural => "GET /$plural\{.format}",
     $builder->('index'),
+  );
+
+  $self->add(
+    $undef => "POST /$plural\{.format}",
+    $builder->('create'),
   );
 
   $self->add(
@@ -471,12 +481,12 @@ sub resource {
   );
 
   $self->add(
-    $singular => "PUT /$plural/{id}{.format}",
+    $undef => "PUT /$plural/{id}{.format}",
     $builder->('update'),
   );
 
   $self->add(
-    $singular => "DELETE /$plural/{id}{.format}",
+    $undef => "DELETE /$plural/{id}{.format}",
     $builder->('delete'),
   );
 
