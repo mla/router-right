@@ -415,11 +415,11 @@ sub _name_to_controller {
 
 
 sub _build_resource_payload {
-  my $self = shift;
+  my $self       = shift;
   my $payload    = shift or croak 'no payload supplied';
-  my $singular   = shift or croak 'no singular member name supplied';
-  my $plural     = shift or croak 'no plural collection name supplied';
-  my $controller = shift // $self->_name_to_controller($plural);
+  my $member     = shift or croak 'no member member name supplied';
+  my $collection = shift or croak 'no collection collection name supplied';
+  my $controller = shift // $self->_name_to_controller($collection);
 
   return sub {
     my $action = shift;
@@ -435,73 +435,73 @@ sub _build_resource_payload {
 
 sub resource {
   my $self = shift;
-  my %args = (@_ % 2 ? (singular => @_) : @_);
+  my %args = (@_ % 2 ? (member => @_) : @_);
  
-  my $singular   = $args{singular} or croak 'no resource member name supplied';
-  my $plural     = $args{plural}  // PL_N($singular);
+  my $member     = $args{member} or croak 'no resource member name supplied';
+  my $collection = $args{collection} // PL_N($member);
   my $payload    = $args{payload} // {};
 
   my $builder = $self->_build_resource_payload(
     $payload,
-    $singular,
-    $plural,
+    $member,
+    $collection,
     $args{controller},
   );
 
   my $undef = undef;
 
   $self->add(
-    $plural => "GET /$plural\{.format}",
+    $collection => "GET /$collection\{.format}",
     $builder->('index'),
   );
 
   $self->add(
-    $undef => "POST /$plural\{.format}",
+    $undef => "POST /$collection\{.format}",
     $builder->('create'),
   );
 
   $self->add(
-    "formatted_$plural" => "GET /$plural.{format}",
+    "formatted_$collection" => "GET /$collection.{format}",
     $builder->('index'),
   );
 
   $self->add(
-    "new_$singular" => "GET /$plural/new{.format}",
+    "new_$member" => "GET /$collection/new{.format}",
     $builder->('new'),
   );
 
   $self->add(
-    "formatted_new_$singular" => "GET /$plural/new.{format}",
+    "formatted_new_$member" => "GET /$collection/new.{format}",
     $builder->('new'),
   );
 
   $self->add(
-    $singular => "GET /$plural/{id}{.format}",
+    $member => "GET /$collection/{id}{.format}",
     $builder->('show'),
   );
 
   $self->add(
-    $undef => "PUT /$plural/{id}{.format}",
+    $undef => "PUT /$collection/{id}{.format}",
     $builder->('update'),
   );
 
   $self->add(
-    $undef => "DELETE /$plural/{id}{.format}",
+    $undef => "DELETE /$collection/{id}{.format}",
     $builder->('delete'),
   );
 
   $self->add(
-    "formatted_$singular" => "GET /$plural/{id}.{format}",
+    "formatted_$member" => "GET /$collection/{id}.{format}",
     $builder->('show'),
   );
 
   $self->add(
-    "edit_$singular" => "GET /$plural/{id}{.format}/edit",
+    "edit_$member" => "GET /$collection/{id}{.format}/edit",
     $builder->('edit'),
   );
 
   $self->add(
-    "formatted_edit_$singular" => "GET /$plural/{id}.{format}/edit",
+    "formatted_edit_$member" => "GET /$collection/{id}.{format}/edit",
     $builder->('edit'),
   );
 }
