@@ -82,12 +82,13 @@ sub _merge_payload {
   my $self = shift;
   my ($payload, $add) = @_;
 
+  $payload ||= {};
+
   my $controller = $add->{controller};
   if ($controller && $controller =~ /^::/ && $payload->{controller}) {
     $add->{controller} = $payload->{controller} . $controller;
   }
 
-  $payload ||= {};
   @{ $payload }{ keys %$add } = values %$add;
 
   return $payload;
