@@ -372,10 +372,13 @@ sub url {
 }
 
 
+sub _submapper_class { 'Router::Right::Submapper' }
+
+
 sub with {
   my $self = shift;
 
-  return Router::Right::Submapper->new(
+  return $self->_submapper_class->new(
     $self,
     @_,
   );
@@ -530,10 +533,10 @@ sub new {
   my $parent = shift or croak 'no parent supplied';
   my $name   = shift;
   my $route  = shift;
-  my %args   = Router::Right->_args(@_);
+  my %args   = $parent->_args(@_);
 
-  (my $methods, $route) = Router::Right->_split_route_path($route);
-  $args{methods} = [ Router::Right->_methods($args{methods}, $methods) ];
+  (my $methods, $route) = $parent->_split_route_path($route);
+  $args{methods} = [ $parent->_methods($args{methods}, $methods) ];
 
   $class = ref($class) || $class;
   my $self = bless {
@@ -552,14 +555,22 @@ sub new {
 }
 
 
+sub _parent {
+  my $self = shift;
+
+  my $parent = $self->{parent} or croak 'no parent defined?!';
+  return $parent;
+}
+
+
 sub add {
   my $self  = shift;
   my $name  = shift;
   my $route = shift // croak 'no route supplied';
 
-  my $parent = $self->{parent} or croak 'no parent?!';
+  my $parent = $self->_parent;
 
-  (my $methods, $route) = Router::Right->_split_route_path($route);
+  (my $methods, $route) = $parent->_split_route_path($route);
 
   $name  = join '_', grep { defined } $self->{name}, $name if defined $name;
   $route = join '', grep { defined } $self->{route}, $route;
@@ -568,7 +579,7 @@ sub add {
     $name,
     $route,
     %{ $self->{args} },
-    Router::Right->_args(@_, methods => $methods),
+    $parent->_args(@_, methods => $methods),
   );
 
   return $self;
@@ -579,14 +590,14 @@ sub resource {
   my $self = shift;
   my $member = shift or croak 'no resource member name supplied';
 
-  my $parent = $self->{parent} or croak 'no parent?!';
+  my $parent = $self->_parent;
 
   $parent->resource(
     $member,
     name => $self->{name},
     path => $self->{route},
     %{ $self->{args} },
-    Router::Right->_args(@_),
+    $parent->_args(@_),
   );
 }
 
@@ -596,6 +607,18 @@ sub with {
   my $self = shift;
 
   $self->new($self, @_);
+}
+
+
+# Forward unknown methods to parent instance 
+sub AUTOLOAD {
+  my $self = shift;
+
+  my $method = our $AUTOLOAD;
+  $method =~ s/.*:://;
+
+  my $parent = $self->_parent;
+  $parent->$method(@_);
 }
 
 
