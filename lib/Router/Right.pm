@@ -78,6 +78,22 @@ sub error {
 }
 
 
+sub _merge_payload {
+  my $self = shift;
+  my ($payload, $add) = @_;
+
+  my $controller = $add->{controller};
+  if ($controller && $controller =~ /^::/ && $payload->{controller}) {
+    $add->{controller} = $payload->{controller} . $controller;
+  }
+
+  $payload ||= {};
+  @{ $payload }{ keys %$add } = values %$add;
+
+  return $payload;
+}
+
+
 sub _args {
   my $self = shift;
   my @args = (@_ % 2 ? (payload => @_) : @_);
@@ -86,9 +102,7 @@ sub _args {
   while (@args) {
     my $key = shift @args;
     if ($key eq 'payload') {
-      my $payload = shift @args;
-      $merged{ $key } ||= {};
-      @{ $merged{ $key } }{ keys %$payload } = values %$payload;
+      $merged{ $key } = $self->_merge_payload($merged{ $key }, shift @args);
     } elsif ($key eq 'methods') {
       $merged{ $key } = [
         grep { defined }
