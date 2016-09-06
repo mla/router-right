@@ -5,6 +5,7 @@ use strict;
 use warnings;
 use 5.10.0; # named captures, see perlver
 use Carp;
+use Data::Dump ();
 use Lingua::EN::Inflect qw/ PL_N /;
 use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
@@ -380,6 +381,9 @@ sub allowed_methods {
 
 sub as_string {
   my $self = shift;
+  my %args = (@_ % 2 ? (verbose => @_) : @_);
+
+  my $verbose = $args{verbose} || 0;
 
   my @routes;
   my %max = (name => 0, method => 0, path => 0);
@@ -393,12 +397,19 @@ sub as_string {
     $max{method} = max($max{method}, length $methods);
     $max{path}   = max($max{path}, length $_->{path});
 
-    push @routes, [ $name, $methods, $_->{path} ];
+    my $payload = Data::Dump::dump($_->{payload});
+    $payload =~ s/\v+/ /g; # strip any vertical whitespace
+
+    push @routes, [ $name, $methods, $_->{path}, $payload ];
   }
+
+  my $fmt = "%$max{name}s %-$max{method}s %-$max{path}s";
+  $fmt .= " %s" if $verbose;
+  $fmt .= "\n";
 
   my $str = '';
   foreach (@routes) {
-    $str .= sprintf "%$max{name}s %-$max{method}s %-$max{path}s\n", @$_;
+    $str .= sprintf $fmt, @$_;
   }
   return $str;
 }

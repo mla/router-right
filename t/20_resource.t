@@ -12,6 +12,8 @@ my $r = $CLASS->new;
 is $r->as_string, '', 'no routes to start';
 
 $r->resource('message');
+my $str = $r->as_string;
+$str =~ s/\s+//g;
 
 my $expected = qq{
               messages GET    /messages{.format}
@@ -26,9 +28,9 @@ my $expected = qq{
           edit_message GET    /messages/{id}{.format}/edit
 formatted_edit_message GET    /messages/{id}.{format}/edit
 };
-$expected =~ s/\A[\r\n]+//;
+$expected =~ s/\s+//g;
 
-is $r->as_string, $expected, 'resource routes added';
+is $str, $expected, 'resource routes added';
 
 done_testing();
 
