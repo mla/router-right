@@ -382,21 +382,23 @@ sub as_string {
   my $self = shift;
 
   my @routes;
-  my $max_name_len   = 0;
-  my $max_method_len = 0;
+  my %max = (name => 0, method => 0, path => 0);
   foreach (map { @$_ } @{ $self->{routes} }) {
     my $name    = $_->{name} // '';
+
     my $methods = join ',', @{ $_->{methods} };
+    $methods ||= '*';
 
-    $max_name_len   = max($max_name_len, length $name);
-    $max_method_len = max($max_method_len, length $methods);
+    $max{name}   = max($max{name}, length $name);
+    $max{method} = max($max{method}, length $methods);
+    $max{path}   = max($max{path}, length $_->{path});
 
-    push @routes, [ $name, $methods || '*', $_->{path} ];
+    push @routes, [ $name, $methods, $_->{path} ];
   }
 
   my $str = '';
   foreach (@routes) {
-    $str .= sprintf "%${max_name_len}s %-${max_method_len}s %s\n", @$_;
+    $str .= sprintf "%$max{name}s %-$max{method}s %-$max{path}s\n", @$_;
   }
   return $str;
 }
