@@ -381,9 +381,6 @@ sub allowed_methods {
 
 sub as_string {
   my $self = shift;
-  my %args = (@_ % 2 ? (verbose => @_) : @_);
-
-  my $verbose = $args{verbose} || 0;
 
   my @routes;
   my %max = (name => 0, method => 0, path => 0);
@@ -403,13 +400,9 @@ sub as_string {
     push @routes, [ $name, $methods, $_->{path}, $payload ];
   }
 
-  my $fmt = "%$max{name}s %-$max{method}s %-$max{path}s";
-  $fmt .= " %s" if $verbose;
-  $fmt .= "\n";
-
   my $str = '';
   foreach (@routes) {
-    $str .= sprintf $fmt, @$_;
+    $str .= sprintf "%$max{name}s %-$max{method}s %-$max{path}s %s\n", @$_;
   }
   return $str;
 }
