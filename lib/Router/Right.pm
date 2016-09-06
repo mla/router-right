@@ -78,6 +78,21 @@ sub error {
 }
 
 
+sub _parse_payload {
+  my $self = shift;
+  my $payload = shift || {};
+
+  return $payload if ref $payload eq 'HASH';
+
+  !ref $payload or croak "unexpected payload '$payload'";
+
+  my ($controller, $action) =
+    $payload =~ /#/ ? split(/#/, $payload, 2) : ($payload, undef);
+
+  return { controller => $controller, action => $action };
+}
+
+
 sub _merge_payload {
   my $self = shift;
   my ($payload, $add) = @_;
@@ -103,7 +118,8 @@ sub _args {
   while (@args) {
     my $key = shift @args;
     if ($key eq 'payload') {
-      $merged{ $key } = $self->_merge_payload($merged{ $key }, shift @args);
+      my $payload = $self->_parse_payload(shift @args);
+      $merged{ $key } = $self->_merge_payload($merged{ $key }, $payload);
     } elsif ($key eq 'methods') {
       $merged{ $key } = [
         grep { defined }
@@ -122,7 +138,7 @@ sub _args {
 # See ROUTE DEFINTION in the POD.
 sub _split_route_path {
   my $self = shift;
-  my $path = shift or croak 'no route path supplied';
+  my $path = shift or return;
 
   $path =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x
     or croak "invalid route path specification '$path'";
@@ -435,96 +451,71 @@ sub _name_to_controller {
 }
 
 
-sub _build_resource_payload {
-  my $self       = shift;
-  my $payload    = shift or croak 'no payload supplied';
-  my $member     = shift or croak 'no member member name supplied';
-  my $collection = shift or croak 'no collection collection name supplied';
-  my $controller = shift // $self->_name_to_controller($collection);
-
-  return sub {
-    my $action = shift;
-
-    return {
-      controller => $controller,
-      action     => $action,
-      %$payload,
-    };
-  };
-}
-
-
 sub resource {
-  my $self = shift;
-  my %args = (@_ % 2 ? (member => @_) : @_);
+  my $self   = shift;
+  my $member = shift or croak 'no resource member name supplied';
+  my %args   = $self->_args(@_);
  
-  my $member     = $args{member} or croak 'no resource member name supplied';
-  my $collection = $args{collection} // PL_N($member);
-  my $payload    = $args{payload} // {};
-
-  my $builder = $self->_build_resource_payload(
-    $payload,
-    $member,
-    $collection,
-    $args{controller},
-  );
+  my $collection = delete $args{collection} // PL_N($member);
 
   my $undef = undef;
 
-  $self->add(
-    $collection => "GET /$collection\{.format}",
-    $builder->('index'),
-  );
+  $self->with($args{name}, $args{path}, %args, call => sub {
+    $_->add(
+      $collection => "GET /$collection\{.format}",
+      { action => 'index' },
+    );
 
-  $self->add(
-    $undef => "POST /$collection\{.format}",
-    $builder->('create'),
-  );
+    $_->add(
+      $undef => "POST /$collection\{.format}",
+      { action => 'create' },
+    );
 
-  $self->add(
-    "formatted_$collection" => "GET /$collection.{format}",
-    $builder->('index'),
-  );
+    $_->add(
+      "formatted_$collection" => "GET /$collection.{format}",
+      { action => 'index' },
+    );
 
-  $self->add(
-    "new_$member" => "GET /$collection/new{.format}",
-    $builder->('new'),
-  );
+    $_->add(
+      "new_$member" => "GET /$collection/new{.format}",
+      { action => 'new' },
+    );
 
-  $self->add(
-    "formatted_new_$member" => "GET /$collection/new.{format}",
-    $builder->('new'),
-  );
+    $_->add(
+      "formatted_new_$member" => "GET /$collection/new.{format}",
+      { action => 'new' },
+    );
 
-  $self->add(
-    $member => "GET /$collection/{id}{.format}",
-    $builder->('show'),
-  );
+    $_->add(
+      $member => "GET /$collection/{id}{.format}",
+      { action => 'show' },
+    );
 
-  $self->add(
-    $undef => "PUT /$collection/{id}{.format}",
-    $builder->('update'),
-  );
+    $_->add(
+      $undef => "PUT /$collection/{id}{.format}",
+      { action => 'update' },
+    );
 
-  $self->add(
-    $undef => "DELETE /$collection/{id}{.format}",
-    $builder->('delete'),
-  );
+    $_->add(
+      $undef => "DELETE /$collection/{id}{.format}",
+      { action => 'delete' },
+    );
 
-  $self->add(
-    "formatted_$member" => "GET /$collection/{id}.{format}",
-    $builder->('show'),
-  );
+    $_->add(
+      "formatted_$member" => "GET /$collection/{id}.{format}",
+      { action => 'show' },
+    );
 
-  $self->add(
-    "edit_$member" => "GET /$collection/{id}{.format}/edit",
-    $builder->('edit'),
-  );
+    $_->add(
+      "edit_$member" => "GET /$collection/{id}{.format}/edit",
+      { action => 'edit' },
+    );
 
-  $self->add(
-    "formatted_edit_$member" => "GET /$collection/{id}.{format}/edit",
-    $builder->('edit'),
-  );
+    $_->add(
+      "formatted_edit_$member" => "GET /$collection/{id}.{format}/edit",
+      { action => 'edit' },
+    );
+  });
 }
 
 
@@ -570,7 +561,7 @@ sub add {
 
   (my $methods, $route) = Router::Right->_split_route_path($route);
 
-  $name  = join '_', grep { defined } $self->{name}, $name;
+  $name  = join '_', grep { defined } $self->{name}, $name if defined $name;
   $route = join '', grep { defined } $self->{route}, $route;
 
   $parent->add(
@@ -581,6 +572,22 @@ sub add {
   );
 
   return $self;
+}
+
+
+sub resource {
+  my $self = shift;
+  my $member = shift or croak 'no resource member name supplied';
+
+  my $parent = $self->{parent} or croak 'no parent?!';
+
+  $parent->resource(
+    $member,
+    name => $self->{name},
+    path => $self->{route},
+    %{ $self->{args} },
+    Router::Right->_args(@_),
+  );
 }
 
 
