@@ -350,16 +350,18 @@ sub url {
 
     my $pname = $_->{pname};
 
-    unless (exists $args{ $pname }) {
+    my $pval;
+    if (exists $args{ $pname }) {
+      $pval = delete $args{ $pname } // '';
+      $pval =~ /$_->{regex}/
+        or croak "invalid value for param '$pname' in url '$name': '$pval'";
+    } else {
       $_->{optional}
         or croak "required param '$pname' missing from url '$name'";
     }
+    $pval //= '';
 
-    my $pval = delete($args{ $pname }) // '';
-    $pval =~ /$_->{regex}/
-      or croak "invalid value for param '$pname' in url '$name': '$pval'";
-
-    if ($pname eq 'format' && $_->{type} eq '.') {
+    if ($pname eq 'format' && $_->{type} eq '.' && length $pval) {
       $pval = ".$pval";
     }
 

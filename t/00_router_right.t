@@ -224,10 +224,18 @@ describe 'Router' => sub {
       is $url, '/entries/1916/08/14';
     };
 
-    it 'with special format placeholder' => sub {
-      $r->add(dl => '/dl/{file}{.format}', {});
-      my $url = $r->url('dl', file => 'foo', format => 'mp3');
-      is $url, '/dl/foo.mp3';
+    describe 'with special format placeholder' => sub {
+      it 'supplied' => sub {
+        $r->add(dl => '/dl/{file}{.format}', {});
+        my $url = $r->url('dl', file => 'foo', format => 'mp3');
+        is $url, '/dl/foo.mp3';
+      };
+
+      it 'not supplied' => sub {
+        $r->add(dl => '/dl/{file}{.format}', {});
+        my $url = $r->url('dl', file => 'foo');
+        is $url, '/dl/foo';
+      };
     };
 
     it 'with non-special format placeholder' => sub {
