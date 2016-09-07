@@ -89,7 +89,10 @@ sub _parse_payload {
   my ($controller, $action) =
     $payload =~ /#/ ? split(/#/, $payload, 2) : ($payload, undef);
 
-  return { controller => $controller, action => $action };
+  return {
+    $controller ? (controller => $controller) : (),
+    $action     ? (action => $action) : (),
+  };
 }
 
 
@@ -439,18 +442,6 @@ sub as_string {
     $str .= sprintf "%$max{name}s %-$max{method}s %-$max{path}s %s\n", @$_;
   }
   return $str;
-}
-
-
-sub _name_to_controller {
-  my $class = shift;
-  my $name  = shift // croak 'no name supplied';
-
-  $name = lc $name;
-  $name =~ s/[-_\s]+/_/g;
-  $name =~ s/(^|_)(.)/$1 ? "::\U$2" : "\U$2"/gxe;
-
-  return $name;
 }
 
 

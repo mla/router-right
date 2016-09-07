@@ -2,39 +2,99 @@
 
 use strict;
 use warnings;
-use Test::More;
+use Test::Spec;
+
+
+sub trimmed($) {
+  my $str = shift;
+
+  $str =~ s/^\s+|\s+$//g;
+  $str =~ s/\s+/ /g;
+
+  return $str;
+}
+
 
 my $CLASS = 'Router::Right';
 
 use_ok $CLASS;
 
-my $r = $CLASS->new;
-is $r->as_string, '', 'no routes to start';
+describe 'Router' => sub {
+  my $r;
 
-done_testing();
-exit 0;
+  before each => sub {
+    $r = $CLASS->new;
+  };
 
-$r->resource('message');
-my $str = $r->as_string;
-$str =~ s/\s+//g;
+  it 'has no routes to start' => sub {
+    is $r->as_string, '', 'no routes to start';
+  };
 
-my $expected = qq{
-              messages GET    /messages{.format}
-                       POST   /messages{.format}
-    formatted_messages GET    /messages.{format}
-           new_message GET    /messages/new{.format}
- formatted_new_message GET    /messages/new.{format}
-               message GET    /messages/{id}{.format}
-                       PUT    /messages/{id}{.format}
-                       DELETE /messages/{id}{.format}
-     formatted_message GET    /messages/{id}.{format}
-          edit_message GET    /messages/{id}{.format}/edit
-formatted_edit_message GET    /messages/{id}.{format}/edit
+  describe 'resource' => sub {
+
+    it 'can be added' => sub {
+      $r->resource('message');
+      
+      my $expected = qq{
+                      messages GET    /messages{.format}           { action => "index" }
+                               POST   /messages{.format}           { action => "create" }
+            formatted_messages GET    /messages.{format}           { action => "index" }
+                   new_message GET    /messages/new{.format}       { action => "new" }
+         formatted_new_message GET    /messages/new.{format}       { action => "new" }
+                       message GET    /messages/{id}{.format}      { action => "show" }
+                               PUT    /messages/{id}{.format}      { action => "update" }
+                               DELETE /messages/{id}{.format}      { action => "delete" }
+             formatted_message GET    /messages/{id}.{format}      { action => "show" }
+                  edit_message GET    /messages/{id}{.format}/edit { action => "edit" }
+        formatted_edit_message GET    /messages/{id}.{format}/edit { action => "edit" }
+      };
+
+      is trimmed($r->as_string), trimmed($expected);
+    };
+
+    it 'can override plural collection name' => sub {
+      $r->resource('message', collection => 'mailboxes');
+
+      my $expected = q{
+                     mailboxes GET    /mailboxes{.format}           { action => "index" }
+                               POST   /mailboxes{.format}           { action => "create" }
+           formatted_mailboxes GET    /mailboxes.{format}           { action => "index" }
+                   new_message GET    /mailboxes/new{.format}       { action => "new" }
+         formatted_new_message GET    /mailboxes/new.{format}       { action => "new" }
+                       message GET    /mailboxes/{id}{.format}      { action => "show" }
+                               PUT    /mailboxes/{id}{.format}      { action => "update" }
+                               DELETE /mailboxes/{id}{.format}      { action => "delete" }
+             formatted_message GET    /mailboxes/{id}.{format}      { action => "show" }
+                  edit_message GET    /mailboxes/{id}{.format}/edit { action => "edit" }
+        formatted_edit_message GET    /mailboxes/{id}.{format}/edit { action => "edit" }
+      };
+
+      is trimmed($r->as_string), trimmed($expected);
+    };
+
+    it 'can be nested' => sub {
+      $r->with(admin => '/admin', { controller => 'Admin' })
+        ->resource('user', { controller => '::User' });
+
+      my $expected = qq{
+              admin_users GET    /admin/users{.format}           { action => "index", controller => "Admin::User" }
+                          POST   /admin/users{.format}           { action => "create", controller => "Admin::User" }
+    admin_formatted_users GET    /admin/users.{format}           { action => "index", controller => "Admin::User" }
+           admin_new_user GET    /admin/users/new{.format}       { action => "new", controller => "Admin::User" }
+ admin_formatted_new_user GET    /admin/users/new.{format}       { action => "new", controller => "Admin::User" }
+               admin_user GET    /admin/users/{id}{.format}      { action => "show", controller => "Admin::User" }
+                          PUT    /admin/users/{id}{.format}      { action => "update", controller => "Admin::User" }
+                          DELETE /admin/users/{id}{.format}      { action => "delete", controller => "Admin::User" }
+     admin_formatted_user GET    /admin/users/{id}.{format}      { action => "show", controller => "Admin::User" }
+          admin_edit_user GET    /admin/users/{id}{.format}/edit { action => "edit", controller => "Admin::User" }
+admin_formatted_edit_user GET    /admin/users/{id}.{format}/edit { action => "edit", controller => "Admin::User" }
+      };
+
+      is trimmed($r->as_string), trimmed($expected);
+    };
+  };
 };
-$expected =~ s/\s+//g;
 
-is $str, $expected, 'resource routes added';
-
-done_testing();
+runtests unless caller;
 
 1;
