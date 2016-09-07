@@ -19,3 +19,7 @@ Router::Boom         267963/s           767%                  43%           --  
 Router::Right        299185/s           868%                  60%          12%            --
 
 This is an area to optimize if performance becomes an issue. 
+
+It should also be possible to scale performance significantly if we add multiple regexes
+based on an X char prefix. If the route path includes a placeholder variable within those X
+characters, it would be included in all the regexes.

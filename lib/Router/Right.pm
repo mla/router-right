@@ -5,12 +5,14 @@ use strict;
 use warnings;
 use 5.10.0; # named captures, see perlver
 use Carp;
+use Data::Dump ();
+use Lingua::EN::Inflect qw/ PL_N /;
 use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
 use URI;
 use URI::QueryParam;
 
-our $VERSION = 0.02;
+our $VERSION = 0.03;
 
 use parent qw/ Exporter /;
 
@@ -76,6 +78,41 @@ sub error {
 }
 
 
+sub _parse_payload {
+  my $self = shift;
+  my $payload = shift || {};
+
+  return $payload      if ref $payload eq 'HASH';
+
+  !ref $payload or croak "unexpected payload '$payload'";
+
+  my ($controller, $action) =
+    $payload =~ /#/ ? split(/#/, $payload, 2) : ($payload, undef);
+
+  return {
+    $controller ? (controller => $controller) : (),
+    $action     ? (action => $action) : (),
+  };
+}
+
+
+sub _merge_payload {
+  my $self = shift;
+  my ($payload, $add) = @_;
+
+  $payload ||= {};
+
+  my $controller = $add->{controller};
+  if ($controller && $controller =~ /^::/ && $payload->{controller}) {
+    $add->{controller} = $payload->{controller} . $controller;
+  }
+
+  @{ $payload }{ keys %$add } = values %$add;
+
+  return $payload;
+}
+
+
 sub _args {
   my $self = shift;
   my @args = (@_ % 2 ? (payload => @_) : @_);
@@ -84,9 +121,8 @@ sub _args {
   while (@args) {
     my $key = shift @args;
     if ($key eq 'payload') {
-      my $payload = shift @args;
-      $merged{ $key } ||= {};
-      @{ $merged{ $key } }{ keys %$payload } = values %$payload;
+      my $payload = $self->_parse_payload(shift @args);
+      $merged{ $key } = $self->_merge_payload($merged{ $key }, $payload);
     } elsif ($key eq 'methods') {
       $merged{ $key } = [
         grep { defined }
@@ -105,7 +141,7 @@ sub _args {
 # See ROUTE DEFINTION in the POD.
 sub _split_route_path {
   my $self = shift;
-  my $path = shift or croak 'no route path supplied';
+  my $path = shift or return;
 
   $path =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x
     or croak "invalid route path specification '$path'";
@@ -190,7 +226,9 @@ sub add {
   delete $self->{regex}; # force recompile
 
   my $payload = delete $args{payload} or croak 'no payload defined';
-  croak "route '$name' already defined" if $self->{name_index}{ $name };
+  if (defined $name && $self->{name_index}{ $name }) {
+    croak "route '$name' already defined";
+  }
 
   (my $methods, $path) = $self->_split_route_path($path);
   my @methods = $self->_methods($args{methods}, $methods);
@@ -214,7 +252,7 @@ sub add {
   #warn "Added route '$name' with index '$index': ", Dumper($_), "\n";
 
   push @{ $self->{routes}[ $index ] ||= [] }, $_;
-  $self->{name_index}{ $name } = $_;
+  $self->{name_index}{ $name } = $_ if defined $name;
 
   return $self;
 }
@@ -312,16 +350,18 @@ sub url {
 
     my $pname = $_->{pname};
 
-    unless (exists $args{ $pname }) {
+    my $pval;
+    if (exists $args{ $pname }) {
+      $pval = delete $args{ $pname } // '';
+      $pval =~ /$_->{regex}/
+        or croak "invalid value for param '$pname' in url '$name': '$pval'";
+    } else {
       $_->{optional}
         or croak "required param '$pname' missing from url '$name'";
     }
+    $pval //= '';
 
-    my $pval = delete($args{ $pname }) // '';
-    $pval =~ /$_->{regex}/
-      or croak "invalid value for param '$pname' in url '$name': '$pval'";
-
-    if ($pname eq 'format' && $_->{type} eq '.') {
+    if ($pname eq 'format' && $_->{type} eq '.' && length $pval) {
       $pval = ".$pval";
     }
 
@@ -337,10 +377,13 @@ sub url {
 }
 
 
+sub _submapper_class { 'Router::Right::Submapper' }
+
+
 sub with {
   my $self = shift;
 
-  return Router::Right::Submapper->new(
+  return $self->_submapper_class->new(
     $self,
     @_,
   );
@@ -379,22 +422,98 @@ sub as_string {
   my $self = shift;
 
   my @routes;
-  my $max_name_len   = 0;
-  my $max_method_len = 0;
+  my %max = (name => 0, method => 0, path => 0);
   foreach (map { @$_ } @{ $self->{routes} }) {
+    my $name    = $_->{name} // '';
+
     my $methods = join ',', @{ $_->{methods} };
+    $methods ||= '*';
 
-    $max_name_len   = max($max_name_len, length $_->{name});
-    $max_method_len = max($max_method_len, length $methods);
+    $max{name}   = max($max{name}, length $name);
+    $max{method} = max($max{method}, length $methods);
+    $max{path}   = max($max{path}, length $_->{path});
 
-    push @routes, [ $_->{name}, $methods || '*', $_->{path} ];
+    my $payload = Data::Dump::dump($_->{payload});
+    $payload =~ s/\v+/ /g; # strip any vertical whitespace
+
+    push @routes, [ $name, $methods, $_->{path}, $payload ];
   }
 
   my $str = '';
   foreach (@routes) {
-    $str .= sprintf "%${max_name_len}s %-${max_method_len}s %s\n", @$_;
+    $str .= sprintf "%$max{name}s %-$max{method}s %-$max{path}s %s\n", @$_;
   }
   return $str;
+}
+
+
+sub resource {
+  my $self   = shift;
+  my $member = shift or croak 'no resource member name supplied';
+  my %args   = $self->_args(@_);
+ 
+  my $collection = delete $args{collection} // PL_N($member);
+
+  my $undef = undef;
+
+  $self->with($args{name}, $args{path}, %args, call => sub {
+    $_->add(
+      $collection => "GET /$collection\{.format}",
+      { action => 'index' },
+    );
+
+    $_->add(
+      $undef => "POST /$collection\{.format}",
+      { action => 'create' },
+    );
+
+    $_->add(
+      "formatted_$collection" => "GET /$collection.{format}",
+      { action => 'index' },
+    );
+
+    $_->add(
+      "new_$member" => "GET /$collection/new{.format}",
+      { action => 'new' },
+    );
+
+    $_->add(
+      "formatted_new_$member" => "GET /$collection/new.{format}",
+      { action => 'new' },
+    );
+
+    $_->add(
+      $member => "GET /$collection/{id}{.format}",
+      { action => 'show' },
+    );
+
+    $_->add(
+      $undef => "PUT /$collection/{id}{.format}",
+      { action => 'update' },
+    );
+
+    $_->add(
+      $undef => "DELETE /$collection/{id}{.format}",
+      { action => 'delete' },
+    );
+
+    $_->add(
+      "formatted_$member" => "GET /$collection/{id}.{format}",
+      { action => 'show' },
+    );
+
+    $_->add(
+      "edit_$member" => "GET /$collection/{id}{.format}/edit",
+      { action => 'edit' },
+    );
+
+    $_->add(
+      "formatted_edit_$member" => "GET /$collection/{id}.{format}/edit",
+      { action => 'edit' },
+    );
+  });
+
+  return $self;
 }
 
 
@@ -409,10 +528,10 @@ sub new {
   my $parent = shift or croak 'no parent supplied';
   my $name   = shift;
   my $route  = shift;
-  my %args   = Router::Right->_args(@_);
+  my %args   = $parent->_args(@_);
 
-  (my $methods, $route) = Router::Right->_split_route_path($route);
-  $args{methods} = [ Router::Right->_methods($args{methods}, $methods) ];
+  (my $methods, $route) = $parent->_split_route_path($route);
+  $args{methods} = [ $parent->_methods($args{methods}, $methods) ];
 
   $class = ref($class) || $class;
   my $self = bless {
@@ -431,23 +550,49 @@ sub new {
 }
 
 
+sub _parent {
+  my $self = shift;
+
+  my $parent = $self->{parent} or croak 'no parent defined?!';
+  return $parent;
+}
+
+
 sub add {
   my $self  = shift;
   my $name  = shift;
   my $route = shift // croak 'no route supplied';
 
-  my $parent = $self->{parent} or croak 'no parent?!';
+  my $parent = $self->_parent;
 
-  (my $methods, $route) = Router::Right->_split_route_path($route);
+  (my $methods, $route) = $parent->_split_route_path($route);
 
-  $name  = join '_', grep { defined } $self->{name}, $name;
+  $name  = join '_', grep { defined } $self->{name}, $name if defined $name;
   $route = join '', grep { defined } $self->{route}, $route;
 
   $parent->add(
     $name,
     $route,
     %{ $self->{args} },
-    Router::Right->_args(@_, methods => $methods),
+    $parent->_args(@_, methods => $methods),
+  );
+
+  return $self;
+}
+
+
+sub resource {
+  my $self = shift;
+  my $member = shift or croak 'no resource member name supplied';
+
+  my $parent = $self->_parent;
+
+  $parent->resource(
+    $member,
+    name => $self->{name},
+    path => $self->{route},
+    %{ $self->{args} },
+    $parent->_args(@_),
   );
 
   return $self;
@@ -459,6 +604,18 @@ sub with {
   my $self = shift;
 
   $self->new($self, @_);
+}
+
+
+# Forward unknown methods to parent instance 
+sub AUTOLOAD {
+  my $self = shift;
+
+  my $method = our $AUTOLOAD;
+  $method =~ s/.*:://;
+
+  my $parent = $self->_parent;
+  $parent->$method(@_);
 }
 
 
@@ -485,6 +642,7 @@ __END__
   );
 
   my $match = $r->match('/blog/1916/08'); 
+
   # Returns {
   #   controller => 'Blog',
   #   action => 'monthly',
@@ -494,7 +652,7 @@ __END__
 
 =head1 DESCRIPTION
 
-Router::Right is a Perl-based, framework-agnostic routing engine used to
+Router::Right is a Perl5-based, framework-agnostic routing engine used to
 map web application request URLs to application handlers.
 
 =head1 METHODS
@@ -507,28 +665,33 @@ Returns a new Router::Right instance
 
 =item add($name => $route_path, payload => \%payload [, %options])
 
-Define a route. $name is used to reference the route elsewhere. On a successful match, the payload hash reference is returned; its contents are completely user-defined and may contain anything. For example:
+Define a route. $name is used to reference the route elsewhere. On a successful match, the payload hash reference is returned; by convention, a payload includes "controller" and "action" values. For example:
 
-  $r->add(entries => '/entries', payload => { controller => 'Entries' })
+  $r->add(entries => '/entries', payload => { controller => 'Entries', action => 'show' })
 
-See the ROUTE DEFINITION section for details on how $route_path values are specified.
-As a convenience, the payload field name may be omitted. i.e.,
+See the ROUTE DEFINITION section for details on how $route_path values are specified. As a convenience, the payload field name may be omitted. i.e.,
 
   add($name => $route_path, \%payload)
 
+Also, if the payload consists solely of controller and action values, it can be specified as a string in the format "controller#action". For example:
+
+  $r->add(entries => '/entries', 'Entries#show')
+
+is exactly equivalent to specifying a payload of: { controller => 'Entries', action => 'show' }.
+
 By default, routes match any HTTP request method (e.g., GET, POST). To restrict them, supply a "methods" option. e.g.,
 
-  $r->add(entries => '/entries', { controller => 'Entries' }, methods => 'GET')
+  $r->add(entries => '/entries', 'Entries#show', methods => 'GET')
 
 That would only match GET requests. The value may be either a string or an array reference of
 strings. e.g.,
 
-  $r->add(entries => '/entries', { controller => 'Entries' }, methods => [qw/ GET POST /])
+  $r->add(entries => '/entries', 'Entries#show', methods => [qw/ GET POST /])
 
 Method strings are case-insensitive. As a convenience, the allowed methods can also be specified
 as part of the route path itself. e.g.,
 
-  $r->add(entries => 'GET|POST /entries', { controller => 'Entries' })
+  $r->add(entries => 'GET|POST /entries', 'Entries#show')
 
 =item match($url [, $method])
 
@@ -577,7 +740,7 @@ The return value is a L<URI> instance.
 
 Returns a report of the defined routes, in order of definition.
 
-=item with($name => $route_path [, %options])
+=item with($name => $route_path [, %options]
 
 Helper method to prevent code duplication. Allows route information to be shared across multiple routes. For example:
 
@@ -589,11 +752,22 @@ Helper method to prevent code duplication. Allows route information to be shared
   print $r->as_string;
 
   # prints:
-  #
-  #   admin_users * /admin/users
-  #   admin_trx   * /admin/transactions
+  #   admin_users * /admin/users        { action => "users", controller => "Admin" }
+  #   admin_trx   * /admin/transactions { action => "transactions", controller => "Admin" }
 
 The payload contents are merged. The route names are joined by an underscore. The paths are simply concatenated. Either or both of $name and $route_path may be undefined.
+
+If a nested route specifies a controller beginning with '::', it is concatenated with
+the outer controller name. For example:
+
+  $r->with(admin => '/admin', 'Admin')
+    ->add(users  => '/users', '::User#show')
+  ;
+
+  print $r->as_string;
+
+  # prints:
+  #   admin_users * /admin/users { action => "show", controller => "Admin::User" }
 
 A callback is accepted, which allows chaining with() calls:
 
@@ -612,6 +786,26 @@ A callback is accepted, which allows chaining with() calls:
   #   admin_dashboard_view * /admin/dashboard/{action}
 
 Within the callback function, $_ is set to the router instance. It is also supplied as a parameter.
+
+=item resource($name, payload => \%payload [, %options])
+
+Adds routes to create, read, update, and delete a given resource. For example:
+
+  my $r = Router::Right->new->resource('message', 'Message');
+  print $r->as_string, "\n";
+
+  # prints:
+  #                 messages GET    /messages{.format}           { action => "index", controller => "Message" }
+  #                          POST   /messages{.format}           { action => "create", controller => "Message" }
+  #       formatted_messages GET    /messages.{format}           { action => "index", controller => "Message" }
+  #              new_message GET    /messages/new{.format}       { action => "new", controller => "Message" }
+  #    formatted_new_message GET    /messages/new.{format}       { action => "new", controller => "Message" }
+  #                  message GET    /messages/{id}{.format}      { action => "show", controller => "Message" }
+  #                          PUT    /messages/{id}{.format}      { action => "update", controller => "Message" }
+  #                          DELETE /messages/{id}{.format}      { action => "delete", controller => "Message" }
+  #        formatted_message GET    /messages/{id}.{format}      { action => "show", controller => "Message" }
+  #             edit_message GET    /messages/{id}{.format}/edit { action => "edit", controller => "Message" }
+  #   formatted_edit_message GET    /messages/{id}.{format}/edit { action => "edit", controller => "Message" }
 
 =back
 

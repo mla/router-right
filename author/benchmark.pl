@@ -6,7 +6,7 @@
 use strict;
 use warnings;
 use utf8;
-use lib 'lib';
+use lib 'lib', '../lib';
 use 5.010000;
 use autodie;
 use Benchmark qw/ :all /;

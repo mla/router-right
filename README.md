@@ -1,11 +1,3 @@
-# NAME
-
-Router::Right - Fast, framework-agnostic URL routing engine for web applications
-
-# VERSION
-
-version 0.02
-
 # SYNOPSIS
 
     use Router::Right;
@@ -180,16 +172,3 @@ Router::Right is based on Tokuhiro Matsuno's Router::Simple and Router::Boom mod
 
 This module seeks to implement most features of Python's Routes:
 [https://routes.readthedocs.io/en/latest/index.html](https://routes.readthedocs.io/en/latest/index.html)
-
-# AUTHOR
-
-Maurice Aubrey <maurice.aubrey@gmail.com>
-
-# COPYRIGHT AND LICENSE
-
-This software is copyright (c) 2016 by Maurice Aubrey.
-
-This is free software; you can redistribute it and/or modify it under
-the same terms as the Perl 5 programming language system itself.
-
-[![Build Status](https://travis-ci.org/mla/router-right.svg?branch=master)](https://travis-ci.org/mla/router-right)

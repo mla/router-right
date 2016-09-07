@@ -35,9 +35,18 @@ describe 'Router' => sub {
       is ref $r->add(home => '/', $payload), $CLASS;
     };
 
+    it 'does not require a route name' => sub {
+      $r->add(undef, '/', $payload);
+    };
+
     it 'raises exception if duplicate route name added' => sub {
       $r->add(home => '/', $payload);
       eval { $r->add(home => '/', $payload) };
+      ok $@;
+    };
+
+    it 'requires a route path' => sub {
+      eval { $r->add('home', undef, $payload) };
       ok $@;
     };
 
@@ -152,26 +161,98 @@ describe 'Router' => sub {
     };
   };
 
+  describe 'payload' => sub {
+    my $payload = { controller => 'Foo', action => 'zort' };
+
+    it 'can be specified as a named hash ref' => sub {
+      $r->add(home => '/', payload => $payload);
+      is_deeply $r->match('/'), $payload;
+    };
+
+    it 'can be specified as a positional hash ref' => sub {
+      $r->add(home => '/', $payload);
+      is_deeply $r->match('/'), $payload;
+    };
+
+    it 'raises exception if not hash ref or scalar' => sub {
+      eval { $r->add(home => '/', []) };
+      ok $@;
+    };
+
+    it 'can be specified as a named scalar' => sub {
+      $r->add(home => '/', payload => 'Foo#zort');
+      is_deeply $r->match('/'), $payload;
+    };
+
+    it 'can be specified as a positional scalar' => sub {
+      $r->add(home => '/', 'Foo#zort');
+      is_deeply $r->match('/'), $payload;
+    };
+
+    it 'can be specified as a scalar with no action' => sub {
+      $r->add(home => '/', 'Foo');
+      is_deeply $r->match('/'), { controller => 'Foo' };
+    };
+
+    it 'can be specified as a scalar with no controller' => sub {
+      $r->add(home => '/', '#zort');
+      is_deeply $r->match('/'), { action => 'zort' };
+    };
+  };
+
   it 'can produce list of routes' => sub {
     $r->add(home => '/', { controller => 'Home' });
-    $r->add(add_entry => 'POST /entries/new', { controller => 'Entries' });
+    $r->add(add => 'POST /add', { controller => 'Entries' });
     ok $r->as_string;
   };
 
   it 'can return list of allowed methods from previous match' => sub {
-    $r->add(add_entry => 'POST /entries/new', { controller => 'Entries' });
-    $r->match('/entries/new');
+    $r->add(add => 'POST /add', {});
+    $r->match('/add');
     is_deeply scalar $r->allowed_methods, ['POST'];
+  };
+
+  it 'can look up allowed methods by route name' => sub {
+    $r->add(add => 'POST /add', {});
+    is_deeply scalar $r->allowed_methods('add'), ['POST'];
+  };
+
+  it 'can look up allowed methods by route path' => sub {
+    $r->add(add => 'POST /add', {});
+    is_deeply scalar $r->allowed_methods('/add'), ['POST'];
   };
 
   describe 'can build url' => sub {
     it 'from route' => sub {
-      $r->add(
-        entry => '/entries/{year}/{month}/{day}',
-        { controller => 'Entries' },
-      );
+      $r->add(entry => '/entries/{year}/{month}/{day}', {});
       my $url = $r->url('entry', year => '1916', month => '08', day => '14');
       is $url, '/entries/1916/08/14';
+    };
+
+    it 'raises exception if invalid placeholder value' => sub {
+      $r->add(entry => '/entries/{year:\d+}', {});
+      eval { $r->url('entry', year => 'foo') };
+      ok $@;
+    };
+
+    describe 'with special format placeholder' => sub {
+      it 'supplied' => sub {
+        $r->add(dl => '/dl/{file}{.format}', {});
+        my $url = $r->url('dl', file => 'foo', format => 'mp3');
+        is $url, '/dl/foo.mp3';
+      };
+
+      it 'not supplied' => sub {
+        $r->add(dl => '/dl/{file}{.format}', {});
+        my $url = $r->url('dl', file => 'foo');
+        is $url, '/dl/foo';
+      };
+    };
+
+    it 'with non-special format placeholder' => sub {
+      $r->add(dl => '/dl/{file}{format}', {});
+      my $url = $r->url('dl', file => 'foo', format => '.mp3');
+      is $url, '/dl/foo.mp3';
     };
 
     it 'from literal url' => sub {

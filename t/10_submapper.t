@@ -42,10 +42,25 @@ describe 'Submapper' => sub {
   it 'can apply callback' => sub {
     my $payload = { controller => 'Admin' };
     $r->with(admin => '/admin', $payload, call => sub {
-      $_->add(users => '/users');
+      $_->add(users => '/users', { action => 'users' });
     });
 
-    ok $r->match('/admin/users');
+    is_deeply $r->match('/admin/users'),
+      { controller => 'Admin', action => 'users' };
+  };
+
+  it 'can append controller' => sub {
+    $r->with(admin => '/admin', 'Admin')
+      ->add(users => '/users', '::User')
+    ;
+    is_deeply $r->match('/admin/users'), { controller => 'Admin::User' };
+  };
+
+  it 'can override controller' => sub {
+    $r->with(admin => '/admin', 'Admin')
+      ->add(users => '/users', 'User')
+    ;
+    is_deeply $r->match('/admin/users'), { controller => 'User' };
   };
 };
 
