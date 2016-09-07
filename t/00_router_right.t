@@ -224,6 +224,12 @@ describe 'Router' => sub {
       is $url, '/entries/1916/08/14';
     };
 
+    it 'raises exception if invalid placeholder value' => sub {
+      $r->add(entry => '/entries/{year:\d+}', {});
+      eval { $r->url('entry', year => 'foo') };
+      ok $@;
+    };
+
     describe 'with special format placeholder' => sub {
       it 'supplied' => sub {
         $r->add(dl => '/dl/{file}{.format}', {});
