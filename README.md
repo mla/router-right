@@ -1,3 +1,11 @@
+# NAME
+
+Router::Right - Fast, framework-agnostic URL routing engine for web applications
+
+# VERSION
+
+version 0.03
+
 # SYNOPSIS
 
     use Router::Right;
@@ -15,6 +23,7 @@
     );
 
     my $match = $r->match('/blog/1916/08'); 
+
     # Returns {
     #   controller => 'Blog',
     #   action => 'monthly',
@@ -24,7 +33,7 @@
 
 # DESCRIPTION
 
-Router::Right is a Perl-based, framework-agnostic routing engine used to
+Router::Right is a Perl5-based, framework-agnostic routing engine used to
 map web application request URLs to application handlers.
 
 # METHODS
@@ -35,28 +44,33 @@ map web application request URLs to application handlers.
 
 - add($name => $route\_path, payload => \\%payload \[, %options\])
 
-    Define a route. $name is used to reference the route elsewhere. On a successful match, the payload hash reference is returned; its contents are completely user-defined and may contain anything. For example:
+    Define a route. $name is used to reference the route elsewhere. On a successful match, the payload hash reference is returned; by convention, a payload includes "controller" and "action" values. For example:
 
-        $r->add(entries => '/entries', payload => { controller => 'Entries' })
+        $r->add(entries => '/entries', payload => { controller => 'Entries', action => 'show' })
 
-    See the ROUTE DEFINITION section for details on how $route\_path values are specified.
-    As a convenience, the payload field name may be omitted. i.e.,
+    See the ROUTE DEFINITION section for details on how $route\_path values are specified. As a convenience, the payload field name may be omitted. i.e.,
 
         add($name => $route_path, \%payload)
 
+    Also, if the payload consists solely of controller and action values, it can be specified as a string in the format "controller#action". For example:
+
+        $r->add(entries => '/entries', 'Entries#show')
+
+    is exactly equivalent to specifying a payload of: { controller => 'Entries', action => 'show' }.
+
     By default, routes match any HTTP request method (e.g., GET, POST). To restrict them, supply a "methods" option. e.g.,
 
-        $r->add(entries => '/entries', { controller => 'Entries' }, methods => 'GET')
+        $r->add(entries => '/entries', 'Entries#show', methods => 'GET')
 
     That would only match GET requests. The value may be either a string or an array reference of
     strings. e.g.,
 
-        $r->add(entries => '/entries', { controller => 'Entries' }, methods => [qw/ GET POST /])
+        $r->add(entries => '/entries', 'Entries#show', methods => [qw/ GET POST /])
 
     Method strings are case-insensitive. As a convenience, the allowed methods can also be specified
     as part of the route path itself. e.g.,
 
-        $r->add(entries => 'GET|POST /entries', { controller => 'Entries' })
+        $r->add(entries => 'GET|POST /entries', 'Entries#show')
 
 - match($url \[, $method\])
 
@@ -105,7 +119,7 @@ map web application request URLs to application handlers.
 
     Returns a report of the defined routes, in order of definition.
 
-- with($name => $route\_path \[, %options\])
+- with($name => $route\_path \[, %options\]
 
     Helper method to prevent code duplication. Allows route information to be shared across multiple routes. For example:
 
@@ -117,11 +131,22 @@ map web application request URLs to application handlers.
         print $r->as_string;
 
         # prints:
-        #
-        #   admin_users * /admin/users
-        #   admin_trx   * /admin/transactions
+        #   admin_users * /admin/users        { action => "users", controller => "Admin" }
+        #   admin_trx   * /admin/transactions { action => "transactions", controller => "Admin" }
 
     The payload contents are merged. The route names are joined by an underscore. The paths are simply concatenated. Either or both of $name and $route\_path may be undefined.
+
+    If a nested route specifies a controller beginning with '::', it is concatenated with
+    the outer controller name. For example:
+
+        $r->with(admin => '/admin', 'Admin')
+          ->add(users  => '/users', '::User#show')
+        ;
+
+        print $r->as_string;
+
+        # prints:
+        #   admin_users * /admin/users { action => "show", controller => "Admin::User" }
 
     A callback is accepted, which allows chaining with() calls:
 
@@ -140,6 +165,26 @@ map web application request URLs to application handlers.
         #   admin_dashboard_view * /admin/dashboard/{action}
 
     Within the callback function, $\_ is set to the router instance. It is also supplied as a parameter.
+
+- resource($name, payload => \\%payload \[, %options\])
+
+    Adds routes to create, read, update, and delete a given resource. For example:
+
+        my $r = Router::Right->new->resource('message', 'Message');
+        print $r->as_string, "\n";
+
+        # prints:
+        #                 messages GET    /messages{.format}           { action => "index", controller => "Message" }
+        #                          POST   /messages{.format}           { action => "create", controller => "Message" }
+        #       formatted_messages GET    /messages.{format}           { action => "index", controller => "Message" }
+        #              new_message GET    /messages/new{.format}       { action => "new", controller => "Message" }
+        #    formatted_new_message GET    /messages/new.{format}       { action => "new", controller => "Message" }
+        #                  message GET    /messages/{id}{.format}      { action => "show", controller => "Message" }
+        #                          PUT    /messages/{id}{.format}      { action => "update", controller => "Message" }
+        #                          DELETE /messages/{id}{.format}      { action => "delete", controller => "Message" }
+        #        formatted_message GET    /messages/{id}.{format}      { action => "show", controller => "Message" }
+        #             edit_message GET    /messages/{id}{.format}/edit { action => "edit", controller => "Message" }
+        #   formatted_edit_message GET    /messages/{id}.{format}/edit { action => "edit", controller => "Message" }
 
 # ROUTE DEFINITION
 
@@ -172,3 +217,16 @@ Router::Right is based on Tokuhiro Matsuno's Router::Simple and Router::Boom mod
 
 This module seeks to implement most features of Python's Routes:
 [https://routes.readthedocs.io/en/latest/index.html](https://routes.readthedocs.io/en/latest/index.html)
+
+# AUTHOR
+
+Maurice Aubrey <maurice.aubrey@gmail.com>
+
+# COPYRIGHT AND LICENSE
+
+This software is copyright (c) 2016 by Maurice Aubrey.
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
+
+[![Build Status](https://travis-ci.org/mla/router-right.svg?branch=master)](https://travis-ci.org/mla/router-right)
