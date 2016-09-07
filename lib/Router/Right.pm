@@ -791,7 +791,7 @@ Within the callback function, $_ is set to the router instance. It is also suppl
 
 Adds routes to create, read, update, and delete a given resource. For example:
 
-  my $r = Router::Right->new->resource('message', 'Message');
+  my $r = Router::Right->new->resource('message', { controller => 'Message' });
   print $r->as_string, "\n";
 
   # prints:
