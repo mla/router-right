@@ -82,7 +82,7 @@ sub _parse_payload {
   my $self = shift;
   my $payload = shift || {};
 
-  return $payload if ref $payload eq 'HASH';
+  return $payload      if ref $payload eq 'HASH';
 
   !ref $payload or croak "unexpected payload '$payload'";
 

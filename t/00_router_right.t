@@ -174,6 +174,11 @@ describe 'Router' => sub {
       is_deeply $r->match('/'), $payload;
     };
 
+    it 'raises exception if not hash ref or scalar' => sub {
+      eval { $r->add(home => '/', []) };
+      ok $@;
+    };
+
     it 'can be specified as a named scalar' => sub {
       $r->add(home => '/', payload => 'Foo#zort');
       is_deeply $r->match('/'), $payload;
