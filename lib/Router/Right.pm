@@ -433,6 +433,7 @@ sub as_string {
     $max{method} = max($max{method}, length $methods);
     $max{path}   = max($max{path}, length $_->{path});
 
+    local $Data::Dump::INDENT = '';
     my $payload = Data::Dump::dump($_->{payload});
     $payload =~ s/\v+/ /g; # strip any vertical whitespace
 
