@@ -128,6 +128,11 @@ sub _args {
         grep { defined }
         $self->_list($merged{ $key }, shift @args)
       ];
+    } elsif ($key eq 'name') {
+      $merged{ $key } =
+        join '_', grep { defined } $merged{ $key }, shift @args;
+    } elsif ($key eq 'path') {
+      $merged{ $key } = join '', grep { defined } $merged{ $key }, shift @args;
     } else {
       $merged{ $key } = shift @args;
     }
