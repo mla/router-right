@@ -4,7 +4,7 @@ Router::Right - Fast, framework-agnostic URL routing engine for web applications
 
 # VERSION
 
-version 0.03
+version 0.04
 
 # SYNOPSIS
 
@@ -12,15 +12,8 @@ version 0.03
 
     my $r = Router::Right->new;
 
-    $r->add(
-      home => '/',
-      { controller => 'Home', action => 'show' },
-    );
-
-    $r->add(
-      blog => '/blog/{year}/{month}',
-      { controller => 'Blog', action => 'monthly' },
-    );
+    $r->add(home => '/', 'Home#show');
+    $r->add(blog => '/blog/{year}/{month}', 'Blog#monthly');
 
     my $match = $r->match('/blog/1916/08'); 
 
@@ -42,15 +35,13 @@ map web application request URLs to application handlers.
 
     Returns a new Router::Right instance
 
-- add($name => $route\_path, payload => \\%payload \[, %options\])
+- add($name => $route\_path, \\%payload \[, %options\])
 
     Define a route. $name is used to reference the route elsewhere. On a successful match, the payload hash reference is returned; by convention, a payload includes "controller" and "action" values. For example:
 
-        $r->add(entries => '/entries', payload => { controller => 'Entries', action => 'show' })
+        $r->add(entries => '/entries', { controller => 'Entries', action => 'show' })
 
-    See the ROUTE DEFINITION section for details on how $route\_path values are specified. As a convenience, the payload field name may be omitted. i.e.,
-
-        add($name => $route_path, \%payload)
+    See the ROUTE DEFINITION section for details on how $route\_path values are specified.
 
     Also, if the payload consists solely of controller and action values, it can be specified as a string in the format "controller#action". For example:
 
@@ -121,11 +112,11 @@ map web application request URLs to application handlers.
 
 - with($name => $route\_path \[, %options\]
 
-    Helper method to prevent code duplication. Allows route information to be shared across multiple routes. For example:
+    Helper method to share information across multiple routes. For example:
 
-        $r->with(admin => '/admin',        { controller => 'Admin' })
-          ->add(users  => '/users',        { action => 'users' })
-          ->add(trx    => '/transactions', { action => 'transactions' })
+        $r->with(admin => '/admin',        'Admin')
+          ->add(users  => '/users',        '#users')
+          ->add(trx    => '/transactions', '#transactions')
         ;
 
         print $r->as_string;
@@ -134,7 +125,7 @@ map web application request URLs to application handlers.
         #   admin_users * /admin/users        { action => "users", controller => "Admin" }
         #   admin_trx   * /admin/transactions { action => "transactions", controller => "Admin" }
 
-    The payload contents are merged. The route names are joined by an underscore. The paths are simply concatenated. Either or both of $name and $route\_path may be undefined.
+    The payload contents are merged. The route names are joined by an underscore. The paths are concatenated. Either or both of $name and $route\_path may be undefined.
 
     If a nested route specifies a controller beginning with '::', it is concatenated with
     the outer controller name. For example:
@@ -166,11 +157,11 @@ map web application request URLs to application handlers.
 
     Within the callback function, $\_ is set to the router instance. It is also supplied as a parameter.
 
-- resource($name, payload => \\%payload \[, %options\])
+- resource($name, \\%payload \[, %options\])
 
     Adds routes to create, read, update, and delete a given resource. For example:
 
-        my $r = Router::Right->new->resource('message', 'Message');
+        my $r = Router::Right->new->resource('message', { controller => 'Message' });
         print $r->as_string, "\n";
 
         # prints:
