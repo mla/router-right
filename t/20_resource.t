@@ -73,21 +73,23 @@ describe 'Router' => sub {
     };
 
     it 'can be nested' => sub {
-      $r->with(admin => '/admin', { controller => 'Admin' })
-        ->resource('user', { controller => '::User' });
+      $r->with(a => '/a', 'A')
+          ->with(b => '/b', '::B')
+            ->with(c => '/c', '::C')
+              ->resource('user', { controller => '::User' });
 
       my $expected = qq{
-              admin_users GET    /admin/users{.format}           { action => "index", controller => "Admin::User" }
-                          POST   /admin/users{.format}           { action => "create", controller => "Admin::User" }
-    admin_formatted_users GET    /admin/users.{format}           { action => "index", controller => "Admin::User" }
-           admin_new_user GET    /admin/users/new{.format}       { action => "new", controller => "Admin::User" }
- admin_formatted_new_user GET    /admin/users/new.{format}       { action => "new", controller => "Admin::User" }
-               admin_user GET    /admin/users/{id}{.format}      { action => "show", controller => "Admin::User" }
-                          PUT    /admin/users/{id}{.format}      { action => "update", controller => "Admin::User" }
-                          DELETE /admin/users/{id}{.format}      { action => "delete", controller => "Admin::User" }
-     admin_formatted_user GET    /admin/users/{id}.{format}      { action => "show", controller => "Admin::User" }
-          admin_edit_user GET    /admin/users/{id}{.format}/edit { action => "edit", controller => "Admin::User" }
-admin_formatted_edit_user GET    /admin/users/{id}.{format}/edit { action => "edit", controller => "Admin::User" }
+                      a_b_c_users GET    /a/b/c/users{.format}           { action => "index", controller => "A::B::C::User" }
+                          POST   /a/b/c/users{.format}           { action => "create", controller => "A::B::C::User" }
+    a_b_c_formatted_users GET    /a/b/c/users.{format}           { action => "index", controller => "A::B::C::User" }
+           a_b_c_new_user GET    /a/b/c/users/new{.format}       { action => "new", controller => "A::B::C::User" }
+ a_b_c_formatted_new_user GET    /a/b/c/users/new.{format}       { action => "new", controller => "A::B::C::User" }
+               a_b_c_user GET    /a/b/c/users/{id}{.format}      { action => "show", controller => "A::B::C::User" }
+                          PUT    /a/b/c/users/{id}{.format}      { action => "update", controller => "A::B::C::User" }
+                          DELETE /a/b/c/users/{id}{.format}      { action => "delete", controller => "A::B::C::User" }
+     a_b_c_formatted_user GET    /a/b/c/users/{id}.{format}      { action => "show", controller => "A::B::C::User" }
+          a_b_c_edit_user GET    /a/b/c/users/{id}{.format}/edit { action => "edit", controller => "A::B::C::User" }
+a_b_c_formatted_edit_user GET    /a/b/c/users/{id}.{format}/edit { action => "edit", controller => "A::B::C::User" }
       };
 
       is trimmed($r->as_string), trimmed($expected);

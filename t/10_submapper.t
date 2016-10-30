@@ -30,13 +30,14 @@ describe 'Submapper' => sub {
   };
 
   it 'can be nested' => sub {
-    my $payload = { controller => 'Admin' };
-    $r->with(admin => '/admin', $payload)
-        ->with(users => '/users')
-          ->add(show => '/{username}')
+    my $payload = { controller => 'A' };
+    $r->with(a => '/a', $payload)
+        ->with(b => '/b')
+          ->with(c => '/c')
+            ->add(show => '/{username}')
     ;
 
-    ok $r->match('/admin/users/foo');
+    ok $r->match('/a/b/c/foo');
   };
 
   it 'can apply callback' => sub {
