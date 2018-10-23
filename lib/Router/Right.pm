@@ -573,7 +573,9 @@ sub add {
 
   (my $methods, $route) = $parent->_split_route_path($route);
 
-  $name  = join '_', grep { defined } $self->{name}, $name if defined $name;
+  $name  = join '_',
+    grep { defined && length } $self->{name}, $name if defined $name;
+
   $route = join '', grep { defined } $self->{route}, $route;
 
   $parent->add(
@@ -611,6 +613,9 @@ sub with {
 
   $self->new($self, @_);
 }
+
+
+sub DESTROY {}
 
 
 # Forward unknown methods to parent instance 
@@ -812,7 +817,7 @@ A route path is a normal URL path with the addition of placeholder variables. Fo
 
   $r->add(entries => '/entries/{year}/{month}');
 
-defines a route path containing two placeholders, "year" and "month'. By default, a placeholder matches any string up to the next forward slash.
+defines a route path containing two placeholders, "year" and "month". By default, a placeholder matches any string up to the next forward slash.
 
 Placeholder names must not begin with a number, nor contain hyphens or forward slashes.
 

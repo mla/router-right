@@ -63,6 +63,14 @@ describe 'Submapper' => sub {
     ;
     is_deeply $r->match('/admin/users'), { controller => 'User' };
   };
+
+  # This was producing a route name of "admin_report_" before.
+  it 'uses with name if name is defined but blank' => sub {
+    $r->with(admin_report => '/admin/resort', 'Admin::Report')
+      ->add('' => '/{action}')
+    ;
+    ok $r->_route('admin_report');
+  };
 };
 
 runtests unless caller;
