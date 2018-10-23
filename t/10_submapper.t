@@ -64,8 +64,9 @@ describe 'Submapper' => sub {
     is_deeply $r->match('/admin/users'), { controller => 'User' };
   };
 
-  # This was producing a route name of "admin_report_" before.
-  it 'uses with name if name is defined but blank' => sub {
+  # Should produce a route name of "admin_report". Before, was producing
+  # "admin_report_" (was tacking on blank name).
+  it 'nested route name inherited when name is defined but blank' => sub {
     $r->with(admin_report => '/admin/resort', 'Admin::Report')
       ->add('' => '/{action}')
     ;
