@@ -175,7 +175,7 @@ A route path is a normal URL path with the addition of placeholder variables. Fo
 
     $r->add(entries => '/entries/{year}/{month}');
 
-defines a route path containing two placeholders, "year" and "month". By default, a placeholder matches any string up to the next forward slash.
+defines a route path containing two placeholders, "year" and "month'. By default, a placeholder matches any string up to the next forward slash.
 
 Placeholder names must not begin with a number, nor contain hyphens or forward slashes.
 

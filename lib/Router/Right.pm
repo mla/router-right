@@ -457,14 +457,20 @@ sub resource {
   my $self   = shift;
   my $member = shift or croak 'no resource member name supplied';
   my %args   = $self->_args(@_);
- 
+
   my $collection = delete $args{collection} // PL_N($member);
+
+  my $member_name = $member;
+  my $collection_name = $collection;
+  foreach ($member_name, $collection_name) {
+    s/-/_/g;
+  }
 
   my $undef = undef;
 
   $self->with($args{name}, $args{path}, %args, call => sub {
     $_->add(
-      $collection => "GET /$collection\{.format}",
+      $collection_name => "GET /$collection\{.format}",
       { action => 'index' },
     );
 
@@ -474,22 +480,22 @@ sub resource {
     );
 
     $_->add(
-      "formatted_$collection" => "GET /$collection.{format}",
+      "formatted_$collection_name" => "GET /$collection.{format}",
       { action => 'index' },
     );
 
     $_->add(
-      "new_$member" => "GET /$collection/new{.format}",
+      "new_$member_name" => "GET /$collection/new{.format}",
       { action => 'new' },
     );
 
     $_->add(
-      "formatted_new_$member" => "GET /$collection/new.{format}",
+      "formatted_new_$member_name" => "GET /$collection/new.{format}",
       { action => 'new' },
     );
 
     $_->add(
-      $member => "GET /$collection/{id}{.format}",
+      $member_name => "GET /$collection/{id}{.format}",
       { action => 'show' },
     );
 
@@ -504,17 +510,17 @@ sub resource {
     );
 
     $_->add(
-      "formatted_$member" => "GET /$collection/{id}.{format}",
+      "formatted_$member_name" => "GET /$collection/{id}.{format}",
       { action => 'show' },
     );
 
     $_->add(
-      "edit_$member" => "GET /$collection/{id}{.format}/edit",
+      "edit_$member_name" => "GET /$collection/{id}{.format}/edit",
       { action => 'edit' },
     );
 
     $_->add(
-      "formatted_edit_$member" => "GET /$collection/{id}.{format}/edit",
+      "formatted_edit_$member_name" => "GET /$collection/{id}.{format}/edit",
       { action => 'edit' },
     );
   });
@@ -575,7 +581,6 @@ sub add {
 
   $name  = join '_',
     grep { defined && length } $self->{name}, $name if defined $name;
-
   $route = join '', grep { defined } $self->{route}, $route;
 
   $parent->add(
@@ -817,7 +822,7 @@ A route path is a normal URL path with the addition of placeholder variables. Fo
 
   $r->add(entries => '/entries/{year}/{month}');
 
-defines a route path containing two placeholders, "year" and "month". By default, a placeholder matches any string up to the next forward slash.
+defines a route path containing two placeholders, "year" and "month'. By default, a placeholder matches any string up to the next forward slash.
 
 Placeholder names must not begin with a number, nor contain hyphens or forward slashes.
 
