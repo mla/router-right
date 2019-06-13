@@ -94,6 +94,11 @@ a_b_c_formatted_edit_user GET    /a/b/c/users/{id}.{format}/edit { action => "ed
 
       is trimmed($r->as_string), trimmed($expected);
     };
+
+    it 'converts dashes to underscores in generated names' => sub {
+      $r->resource('unit-type');
+      ok $r->_route('unit_type');
+    };
   };
 };
 
