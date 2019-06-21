@@ -130,7 +130,7 @@ sub _args {
       ];
     } elsif ($key eq 'name') {
       $merged{ $key } =
-        join '_', grep { defined } $merged{ $key }, shift @args;
+        join '_', grep { defined && length } $merged{ $key }, shift @args;
     } elsif ($key eq 'path') {
       $merged{ $key } = join '', grep { defined } $merged{ $key }, shift @args;
     } else {
@@ -458,21 +458,20 @@ sub resource {
   my $member = shift or croak 'no resource member name supplied';
   my %args   = $self->_args(@_);
 
-  my $collection = delete $args{collection} // PL_N($member);
-  my $member_id  = delete $args{member_id} // "${member}_id";
+  my $collection      = delete $args{collection} // PL_N($member);
+  my $collection_name = delete $args{collection_name} // $collection;
+  my $member_name     = delete $args{member_name} // $member;
 
-  my $func       = delete $args{call};
-
-  my $member_name = $member;
-  my $collection_name = $collection;
   foreach ($member_name, $collection_name) {
     s/-/_/g;
   }
 
-  my $undef = undef;
+  my $member_id = delete $args{member_id} // "${member_name}_id";
+  my $func      = delete $args{call};
 
   my $submap = $self->with(delete $args{name}, delete $args{path}, %args);
 
+  my $undef = undef;
   $submap->add(
     $collection_name => "GET /$collection\{.format}",
     { action => 'index' },
@@ -530,8 +529,8 @@ sub resource {
   );
 
   $submap->with(
-    $collection_name, "/$collection/{$member_id}",
-    call => $func,
+    $collection_name => "/$collection/{$member_id}",
+    call => $func, # may be undefined
   );
 }
 
