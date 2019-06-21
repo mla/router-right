@@ -540,7 +540,7 @@ sub resource {
   );
 
   $submap->with(
-    $collection_name => "/$collection/{$member_id}",
+    $member_name => "/$collection/{$member_id}",
     do => $func, # may be undefined
   );
 }
