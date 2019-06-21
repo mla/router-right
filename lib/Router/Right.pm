@@ -529,15 +529,10 @@ sub resource {
     { action => 'edit' },
   );
 
-  $submap = $submap->with($collection_name, "/$collection/{$member_id}");
-
-  if ($func) {
-    local $_ = $submap;
-    $func->($submap);
-    return $self;
-  }
-
-  return $submap;
+  $submap->with(
+    $collection_name, "/$collection/{$member_id}",
+    call => $func,
+  );
 }
 
 
@@ -568,6 +563,7 @@ sub new {
   if (my $func = $args{call}) {
     local $_ = $self;
     $func->($self);
+    return $parent;
   }
 
   return $self;
