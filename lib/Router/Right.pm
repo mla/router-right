@@ -459,6 +459,9 @@ sub resource {
   my %args   = $self->_args(@_);
 
   my $collection = delete $args{collection} // PL_N($member);
+  my $member_id  = delete $args{member_id} // "${member}_id";
+
+  my $func       = delete $args{call};
 
   my $member_name = $member;
   my $collection_name = $collection;
@@ -468,64 +471,73 @@ sub resource {
 
   my $undef = undef;
 
-  $self->with($args{name}, $args{path}, %args, call => sub {
-    $_->add(
-      $collection_name => "GET /$collection\{.format}",
-      { action => 'index' },
-    );
+  my $submap = $self->with(delete $args{name}, delete $args{path}, %args);
 
-    $_->add(
-      $undef => "POST /$collection\{.format}",
-      { action => 'create' },
-    );
+  $submap->add(
+    $collection_name => "GET /$collection\{.format}",
+    { action => 'index' },
+  );
 
-    $_->add(
-      "formatted_$collection_name" => "GET /$collection.{format}",
-      { action => 'index' },
-    );
+  $submap->add(
+    $undef => "POST /$collection\{.format}",
+    { action => 'create' },
+  );
 
-    $_->add(
-      "new_$member_name" => "GET /$collection/new{.format}",
-      { action => 'new' },
-    );
+  $submap->add(
+    "formatted_$collection_name" => "GET /$collection.{format}",
+    { action => 'index' },
+  );
 
-    $_->add(
-      "formatted_new_$member_name" => "GET /$collection/new.{format}",
-      { action => 'new' },
-    );
+  $submap->add(
+    "new_$member_name" => "GET /$collection/new{.format}",
+    { action => 'new' },
+  );
 
-    $_->add(
-      $member_name => "GET /$collection/{id}{.format}",
-      { action => 'show' },
-    );
+  $submap->add(
+    "formatted_new_$member_name" => "GET /$collection/new.{format}",
+    { action => 'new' },
+  );
 
-    $_->add(
-      $undef => "PUT /$collection/{id}{.format}",
-      { action => 'update' },
-    );
+  $submap->add(
+    $member_name => "GET /$collection/{$member_id}{.format}",
+    { action => 'show' },
+  );
 
-    $_->add(
-      $undef => "DELETE /$collection/{id}{.format}",
-      { action => 'delete' },
-    );
+  $submap->add(
+    $undef => "PUT /$collection/{$member_id}{.format}",
+    { action => 'update' },
+  );
 
-    $_->add(
-      "formatted_$member_name" => "GET /$collection/{id}.{format}",
-      { action => 'show' },
-    );
+  $submap->add(
+    $undef => "DELETE /$collection/{$member_id}{.format}",
+    { action => 'delete' },
+  );
 
-    $_->add(
-      "edit_$member_name" => "GET /$collection/{id}{.format}/edit",
-      { action => 'edit' },
-    );
+  $submap->add(
+    "formatted_$member_name" => "GET /$collection/{$member_id}.{format}",
+    { action => 'show' },
+  );
 
-    $_->add(
-      "formatted_edit_$member_name" => "GET /$collection/{id}.{format}/edit",
-      { action => 'edit' },
-    );
-  });
+  $submap->add(
+    "edit_$member_name" => "GET /$collection/{$member_id}{.format}/edit",
+    { action => 'edit' },
+  );
 
-  return $self;
+  $submap->add(
+    "formatted_edit_$member_name" =>
+      "GET /$collection/{$member_id}.{format}/edit",
+    { action => 'edit' },
+  );
+
+  $submap = $submap->with($collection_name, "/$collection/{$member_id}");
+
+  if ($func) {
+    local $_ = $submap;
+    $func->($submap);
+    return $self;
+  }
+
+  return $submap;
 }
 
 
@@ -607,8 +619,6 @@ sub resource {
     %{ $self->{args} },
     $parent->_args(@_),
   );
-
-  return $self;
 }
 
 
