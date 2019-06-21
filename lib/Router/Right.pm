@@ -113,32 +113,43 @@ sub _merge_payload {
 }
 
 
-sub _args {
-  my $self = shift;
-  my @args = (@_ % 2 ? (payload => @_) : @_);
+{
+  my %alias = (
+    call     => 'do',
+    cb       => 'do',
+    callback => 'do',
+  );
 
-  my %merged;
-  while (@args) {
-    my $key = shift @args;
-    if ($key eq 'payload') {
-      my $payload = $self->_parse_payload(shift @args);
-      $merged{ $key } = $self->_merge_payload($merged{ $key }, $payload);
-    } elsif ($key eq 'methods') {
-      $merged{ $key } = [
-        grep { defined }
-        $self->_list($merged{ $key }, shift @args)
-      ];
-    } elsif ($key eq 'name') {
-      $merged{ $key } =
-        join '_', grep { defined && length } $merged{ $key }, shift @args;
-    } elsif ($key eq 'path') {
-      $merged{ $key } = join '', grep { defined } $merged{ $key }, shift @args;
-    } else {
-      $merged{ $key } = shift @args;
+  sub _args {
+    my $self = shift;
+    my @args = (@_ % 2 ? (payload => @_) : @_);
+  
+    my %merged;
+    while (@args) {
+      my $key = shift @args;
+      $key = $alias{ $key } // $key;
+
+      if ($key eq 'payload') {
+        my $payload = $self->_parse_payload(shift @args);
+        $merged{ $key } = $self->_merge_payload($merged{ $key }, $payload);
+      } elsif ($key eq 'methods') {
+        $merged{ $key } = [
+          grep { defined }
+          $self->_list($merged{ $key }, shift @args)
+        ];
+      } elsif ($key eq 'name') {
+        $merged{ $key } =
+          join '_', grep { defined && length } $merged{ $key }, shift @args;
+      } elsif ($key eq 'path') {
+        $merged{ $key } =
+          join '', grep { defined } $merged{ $key }, shift @args;
+      } else {
+        $merged{ $key } = shift @args;
+      }
     }
+  
+    return wantarray ? %merged : \%merged;
   }
-
-  return wantarray ? %merged : \%merged;
 }
 
 
@@ -467,7 +478,7 @@ sub resource {
   }
 
   my $member_id = delete $args{member_id} // "${member_name}_id";
-  my $func      = delete $args{call};
+  my $func      = delete $args{do};
 
   my $submap = $self->with(delete $args{name}, delete $args{path}, %args);
 
@@ -530,7 +541,7 @@ sub resource {
 
   $submap->with(
     $collection_name => "/$collection/{$member_id}",
-    call => $func, # may be undefined
+    do => $func, # may be undefined
   );
 }
 
@@ -559,7 +570,7 @@ sub new {
     args   => \%args,
   };
 
-  if (my $func = $args{call}) {
+  if (my $func = $args{do}) {
     local $_ = $self;
     $func->($self);
     return $parent;
