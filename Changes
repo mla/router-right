@@ -1,11 +1,20 @@
+Version
+
+  - Submapper used for resource() now
+  - If passed a callback function, both with() and resource()
+    now return the *parent* object rather than the submapper,
+    to allow easier chaining.
+  - Nested route specifications no longer require a path. All that
+    matters is that the composed path is valid.
+
 Version 0.04
 
-  Fix nested resource()
+  - Fix nested resource()
 
 Version 0.03
 
-  Add resource() support
+  - Add resource() support
 
 Version 0.01
 
-  Initial release
+  - Initial release

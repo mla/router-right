@@ -159,7 +159,7 @@ sub _split_route_path {
   my $self = shift;
   my $path = shift or return;
 
-  $path =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x
+  $path =~ m{^\s* ([^/\s]+)? \s* (/[^\s]*)? \s*$}x
     or croak "invalid route path specification '$path'";
   return ($1, $2); # methods, path
 }
@@ -559,14 +559,14 @@ sub new {
   my $route  = shift;
   my %args   = $parent->_args(@_);
 
-  (my $methods, $route) = $parent->_split_route_path($route);
+  my ($methods, $path) = $parent->_split_route_path($route);
   $args{methods} = [ $parent->_methods($args{methods}, $methods) ];
 
   $class = ref($class) || $class;
   my $self = bless {
     parent => $parent,
     name   => $name,
-    route  => $route,
+    path   => $path,
     args   => \%args,
   };
 
@@ -595,15 +595,16 @@ sub add {
 
   my $parent = $self->_parent;
 
-  (my $methods, $route) = $parent->_split_route_path($route);
+  my ($methods, $path) = $parent->_split_route_path($route);
 
   $name  = join '_',
     grep { defined && length } $self->{name}, $name if defined $name;
-  $route = join '', grep { defined } $self->{route}, $route;
+  $path = join '', grep { defined } $self->{path}, $path;
+  length $path or croak "invalid route path specification '$route'";
 
   $parent->add(
     $name,
-    $route,
+    $path,
     %{ $self->{args} },
     $parent->_args(@_, methods => $methods),
   );
@@ -621,7 +622,7 @@ sub resource {
   $parent->resource(
     $member,
     name => $self->{name},
-    path => $self->{route},
+    path => $self->{path},
     %{ $self->{args} },
     $parent->_args(@_),
   );
