@@ -30,6 +30,8 @@ sub new {
   my $match;
 
   my $self = bless {
+    @_,
+
     routes      => [],      # routes in insertion order, grouped by path
     route_index => {},      # path => route index of group in above routes[]
     name_index  => {},      # route name => route
@@ -38,6 +40,14 @@ sub new {
   }, $class;
 
   return $self;
+}
+
+
+sub parent {
+  my $self = shift;
+
+  $self->{parent} = shift if @_;
+  return $self->{parent};
 }
 
 
@@ -228,15 +238,42 @@ sub add {
   my $path = shift // croak 'no route path supplied';
   my %args = $self->_args(@_);
 
+  if (my $parent = $self->parent) {
+    my @args = (
+      $name,
+      $path,
+      path    => $self->{path},
+      name    => $self->{name},
+      payload => $self->{payload},
+      methods => $self->{methods},
+      %args,
+    );
+
+    use Data::Dumper;
+    warn "calling parent ", Dumper(\@args), "\n";
+
+    return $parent->add(@args);
+  }
+
   delete $self->{regex}; # force recompile
+
+  (my $methods, $path) = $self->_split_route_path($path);
+  my @methods = $self->_methods($args{methods}, $methods);
+
+  %args = $self->_args(
+    %args,
+    path    => $path,
+    name    => $name,
+    methods => $methods,
+  );
+
+  $name = $args{name};
+  $path = $args{path};
 
   my $payload = delete $args{payload} or croak 'no payload defined';
   if (defined $name && $self->{name_index}{ $name }) {
     croak "route '$name' already defined";
   }
-
-  (my $methods, $path) = $self->_split_route_path($path);
-  my @methods = $self->_methods($args{methods}, $methods);
 
   my $index = $self->_group_index($path);
 
@@ -260,6 +297,24 @@ sub add {
   $self->{name_index}{ $name } = $_ if defined $name;
 
   return $self;
+}
+
+
+sub with {
+  my $self  = shift;
+  my $name  = shift;
+  my $route = shift;
+  my %args  = $self->_args(@_);
+
+  my ($methods, $path) = $self->_split_route_path($route);
+  $args{methods} = [ $self->_methods($args{methods}, $methods) ];
+
+  return $self->new(
+    %args,
+    parent => $self,
+    name   => $name,
+    path   => $path,
+  );
 }
 
 
@@ -379,19 +434,6 @@ sub url {
   $uri->query_param($_ => $args{$_}) foreach keys %args;
 
   return $uri;
-}
-
-
-sub _submapper_class { 'Router::Right::Submapper' }
-
-
-sub with {
-  my $self = shift;
-
-  return $self->_submapper_class->new(
-    $self,
-    @_,
-  );
 }
 
 
@@ -526,112 +568,6 @@ sub resource {
   });
 
   return $self;
-}
-
-
-package Router::Right::Submapper;
-
-use strict;
-use warnings;
-use Carp;
-
-sub new {
-  my $class  = shift;
-  my $parent = shift or croak 'no parent supplied';
-  my $name   = shift;
-  my $route  = shift;
-  my %args   = $parent->_args(@_);
-
-  (my $methods, $route) = $parent->_split_route_path($route);
-  $args{methods} = [ $parent->_methods($args{methods}, $methods) ];
-
-  $class = ref($class) || $class;
-  my $self = bless {
-    parent => $parent,
-    name   => $name,
-    route  => $route,
-    args   => \%args,
-  };
-
-  if (my $func = $args{call}) {
-    local $_ = $self;
-    $func->($self);
-  }
-
-  return $self;
-}
-
-
-sub _parent {
-  my $self = shift;
-
-  my $parent = $self->{parent} or croak 'no parent defined?!';
-  return $parent;
-}
-
-
-sub add {
-  my $self  = shift;
-  my $name  = shift;
-  my $route = shift // croak 'no route supplied';
-
-  my $parent = $self->_parent;
-
-  (my $methods, $route) = $parent->_split_route_path($route);
-
-  $name  = join '_',
-    grep { defined && length } $self->{name}, $name if defined $name;
-  $route = join '', grep { defined } $self->{route}, $route;
-
-  $parent->add(
-    $name,
-    $route,
-    %{ $self->{args} },
-    $parent->_args(@_, methods => $methods),
-  );
-
-  return $self;
-}
-
-
-sub resource {
-  my $self = shift;
-  my $member = shift or croak 'no resource member name supplied';
-
-  my $parent = $self->_parent;
-
-  $parent->resource(
-    $member,
-    name => $self->{name},
-    path => $self->{route},
-    %{ $self->{args} },
-    $parent->_args(@_),
-  );
-
-  return $self;
-}
-
-
-# nested submapper
-sub with {
-  my $self = shift;
-
-  $self->new($self, @_);
-}
-
-
-sub DESTROY {}
-
-
-# Forward unknown methods to parent instance 
-sub AUTOLOAD {
-  my $self = shift;
-
-  my $method = our $AUTOLOAD;
-  $method =~ s/.*:://;
-
-  my $parent = $self->_parent;
-  $parent->$method(@_);
 }
 
 
