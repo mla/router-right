@@ -148,7 +148,8 @@ sub _split_route_path {
   my $self = shift;
   my $path = shift or return;
 
-  $path =~ m{^\s* (?:([^/]+)\s+)? (/.*)}x
+  # Optional methods followed by path or start of placeholder (i.e., {)
+  $path =~ m{^\s* (?:([^/]+)\s+)? ([/\{].*)}x
     or croak "invalid route path specification '$path'";
   return ($1, $2); # methods, path
 }
