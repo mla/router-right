@@ -11,6 +11,9 @@
     To revert to the old behavior, create a Router::Right subclass and
     override the _match_class() method to return the undefined value.
 
+  - Tie::IxHash used in url() method to maintain ordering of parameters
+    as passed in.
+
 0.04
 
   - Fix nested resource()
