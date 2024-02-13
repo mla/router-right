@@ -9,10 +9,11 @@ use Data::Dump ();
 use Lingua::EN::Inflect qw/ PL_N /;
 use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
+use Tie::IxHash;
 use URI;
 use URI::QueryParam;
 
-our $VERSION = 1.05;
+our $VERSION = 0.04;
 
 use parent qw/ Exporter /;
 
@@ -148,7 +149,6 @@ sub _split_route_path {
   my $self = shift;
   my $path = shift or return;
 
-  # Optional methods followed by path or start of placeholder (i.e., {)
   $path =~ m{^\s* (?:([^/]+)\s+)? ([/\{].*)}x
     or croak "invalid route path specification '$path'";
   return ($1, $2); # methods, path
@@ -286,6 +286,9 @@ sub _compile {
 }
 
 
+sub _match_class { 'Router::Right::Match' }
+
+
 sub match {
   my $self   = shift;
   my $path   = shift;
@@ -321,16 +324,29 @@ sub match {
 
   $matched_route or return $self->error(METHOD_NOT_ALLOWED);
 
+  # use Data::Dumper; warn Dumper($matched_route), "\n";
+
   # XXX Most of the time is related to copying the %+ hash; faster way?
   #return { %{ $matched_route->{payload} } };
-  return { %{ $matched_route->{payload} }, %+ };
+  my $payload = { %{ $matched_route->{payload} }, %+ };
+  my $match_class = $self->_match_class;
+
+  $match_class or return $payload; # Raw hash, no blessing
+
+  if (ref $match_class eq 'CODE') {
+    return $match_class->($self, $payload, $matched_route);
+  }
+
+  return $match_class->new($payload, $matched_route);
 }
 
 
 sub url {
   my $self = shift;
   my $name = shift or croak 'no url name supplied';
-  my %args = @_;
+
+  my %args;
+  tie %args, 'Tie::IxHash', @_;
 
   my @route;
   if (my $route = $self->{name_index}{ $name }) {
@@ -633,6 +649,44 @@ sub AUTOLOAD {
 
   my $parent = $self->_parent;
   $parent->$method(@_);
+}
+
+
+package Router::Right::Match;
+
+# Default match object. Note that it uses inside-out object design
+# (see the "Inside-Out Objects" section of perldoc perlobj)
+
+use strict;
+use warnings;
+use Carp;
+use Hash::Util qw/ fieldhash /;
+
+fieldhash my %routes;
+
+
+sub new {
+  my $class = shift;
+  my $data  = shift or croak 'no data supplied';
+  my $route = shift or croak 'no route supplied';
+
+  $class = ref($class) || $class;
+
+  my $self = bless $data, $class;
+  $routes{ $self } = $route;
+
+  return $self;
+}
+
+
+sub AUTOLOAD {
+  my $self = shift;
+
+  my $field = our $AUTOLOAD;
+  $field =~ s/.*:://;
+
+  my $route = $routes{ $self } or return;
+  return $route->{ $field };
 }
 
 
