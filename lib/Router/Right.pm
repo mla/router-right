@@ -763,6 +763,10 @@ If a match is found, its associated payload is returned. If not, undef is return
 
 $method, if supplied, is the HTTP method of the request (e.g., GET, POST, etc.). Specifying $method may prevent a route from otherwise matching if the route was defined with a restricted set of allowed methods (see ROUTE DEFINITION). By default, all request methods are allowed.
 
+While the payload is always a hash reference, starting with version 1.05,
+it is also blessed into the Router::Right::Match class, which provides
+access to the route definition that resulted in the match.
+
 =item error()
 
 Returns the error code of the last failed match.

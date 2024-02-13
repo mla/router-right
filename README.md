@@ -63,6 +63,11 @@ map web application request URLs to application handlers.
 
     $method, if supplied, is the HTTP method of the request (e.g., GET, POST, etc.). Specifying $method may prevent a route from otherwise matching if the route was defined with a restricted set of allowed methods (see ROUTE DEFINITION). By default, all request methods are allowed.
 
+    The payload is returned as a blessed hash reference (by default, a
+    Router::Right::Match instance). The match class can be changed/customized
+    by creating a Router::Right subclass and overridding the \_match\_class()
+    method.
+
 - error()
 
     Returns the error code of the last failed match.
