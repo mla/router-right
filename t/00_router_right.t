@@ -88,7 +88,11 @@ describe 'Router' => sub {
 
     it 'a known route returns payload' => sub {
       $r->add(home => '/', $payload);
-      is_deeply $r->match('/'), $payload;
+      my $match = $r->match('/');
+
+      is_deeply $match, $payload;
+      is_blessed $match, 'Router::Right::Match', 'match is blessed instance';
+
       is_deeply $r->match('/'), $payload, 'cached regex';
     };
 
