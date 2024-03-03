@@ -1,6 +1,6 @@
 1.05 Feb 12, 2024
 
-  - Important! Note potential non-backwards compatible change:
+  - IMPORTANT! Note potential non-backwards compatible change:
 
   - The match() method now returns a blessed match instance.
 
