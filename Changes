@@ -1,5 +1,14 @@
 1.06 (unreleased)
 
+  - with() returns a Router::Right, not a Router::Right::Submapper. A
+    scope is the router's own class (so a subclass's overrides apply to
+    routes added through it) sharing the same routes, with a name prefix,
+    a path prefix and default options. Router::Right::Submapper and
+    _submapper_class() are gone; code that subclassed the submapper
+    should override the method on its router subclass instead.
+
+  - A payload hash passed to add() or with() is never modified.
+
   - match() works on Perl 5.10 to 5.16. It recorded the matching route
     through a closure inside the regex, which those versions do not bind,
     so every path matched the first route defined.
@@ -23,9 +32,6 @@
   - Router::Right::Match has real accessors for the route fields. Any
     other method name dies instead of returning undef, and can() answers
     for the fields.
-
-  - with() honours _submapper_class(), and a scope's can() finds the
-    router methods it forwards.
 
   - A route may be named 0.
 

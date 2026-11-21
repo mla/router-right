@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# with() scopes and resource(), beyond what 10_submapper.t and
+# with() scopes and resource(), beyond what 10_with.t and
 # 20_resource.t cover.
 
 use strict;
@@ -12,12 +12,20 @@ my $CLASS = 'Router::Right';
 use_ok $CLASS;
 
 {
-  package Router::Right::Test::Scoped;
+  # GET implies HEAD, the way a subclass might add it.
+  package Router::Right::Test::Head;
   use parent -norequire, 'Router::Right';
-  sub _submapper_class { 'Router::Right::Test::Scoped::Submapper' }
 
-  package Router::Right::Test::Scoped::Submapper;
-  use parent -norequire, 'Router::Right::Submapper';
+  sub _methods {
+    my $self    = shift;
+    my @methods = $self->SUPER::_methods(@_);
+
+    push @methods, 'HEAD' if grep { $_ eq 'GET' } @methods;
+    my %seen;
+    @methods = sort grep { !$seen{ $_ }++ } @methods;
+
+    return wantarray ? @methods : \@methods;
+  }
 }
 
 describe 'Router' => sub {
@@ -107,7 +115,7 @@ describe 'Router' => sub {
       $r->with(a => '/a', 'A', call => sub { @seen = ($_, $_[0]) });
 
       is $seen[0], $seen[1];
-      isa_ok $seen[0], 'Router::Right::Submapper';
+      is ref $seen[0], ref $r;
     };
 
     it 'returns the scope, so a chain keeps adding to it' => sub {
@@ -117,13 +125,103 @@ describe 'Router' => sub {
       is $scope->resource('thing', '::Thing'), $scope;
     };
 
-    it 'is built from the submapper class the router names' => sub {
-      my $scoped = Router::Right::Test::Scoped->new;
+    it 'is a router of the same class, at every depth' => sub {
+      my $head = Router::Right::Test::Head->new;
 
-      isa_ok $scoped->with(a => '/a', 'A'),
-        'Router::Right::Test::Scoped::Submapper';
-      isa_ok $scoped->with(a => '/a', 'A')->with(b => '/b'),
-        'Router::Right::Test::Scoped::Submapper';
+      is ref $r->with(a => '/a', 'A'), ref $r;
+      is ref $head->with(a => '/a', 'A'), ref $head;
+      is ref $head->with(a => '/a', 'A')->with(b => '/b'), ref $head;
+    };
+
+    it 'applies a subclass override to the routes it adds' => sub {
+      my $head = Router::Right::Test::Head->new;
+      $head->with(a => '/a', 'A', call => sub {
+        $_->add(b => 'GET /b');
+        $_->with(c => '/c')->add(d => 'GET /d');
+        $_->resource('note', '::Note');
+      });
+
+      is_deeply [ $head->allowed_methods('a_b') ], [qw/ GET HEAD /];
+      is_deeply [ $head->allowed_methods('a_c_d') ], [qw/ GET HEAD /];
+      ok $head->match('/a/notes/3', 'HEAD');
+    };
+
+    it 'is not the router it came from' => sub {
+      my $scope = $r->with(a => '/a', 'A');
+
+      isnt $scope, $r;
+      $r->add(top => '/top', 'Top');
+      is $r->url('top'), '/top';
+    };
+
+    it 'shares one table with the router and its other scopes' => sub {
+      my $a = $r->with(a => '/a', 'A');
+      my $b = $r->with(b => '/b', 'B');
+      $a->add(x => '/x');
+      $b->add(y => '/y');
+      $r->add(z => '/z', 'Z');
+
+      foreach my $via ($r, $a, $b, $a->with(deep => '/deep')) {
+        is_deeply [ map { $_->{name} } $via->routes ], [qw/ a_x b_y z /];
+        is $via->match('/b/y')->{controller}, 'B';
+        is $via->url('a_x'), '/a/x';
+      }
+    };
+
+    it 'sees a route added through another scope after a match' => sub {
+      my $a = $r->with(a => '/a', 'A');
+      $a->add(x => '/x');
+      ok !$r->match('/a/late');
+
+      $a->add(late => '/late');
+      ok $r->match('/a/late');
+      ok $a->match('/a/late');
+    };
+
+    it 'reports the last match and its error through any scope' => sub {
+      my $a = $r->with(a => '/a', 'A')->add(x => 'GET /x');
+
+      ok !$r->match('/a/x', 'POST');
+      is $a->error, 405;
+      is_deeply [ $a->allowed_methods ], ['GET'];
+    };
+
+    it 'keeps adding under its prefix after other scopes were made' => sub {
+      my $a = $r->with(a => '/a', 'A');
+      $a->with(b => '/b', '::B')->add(x => '/x');
+      $r->with(c => '/c', 'C')->add(y => '/y');
+      $a->add(z => '/z');
+
+      is $r->match('/a/z')->{controller}, 'A';
+      is $r->url('a_z'), '/a/z';
+    };
+
+    it 'leaves the payload hash it was given alone' => sub {
+      my $outer = { controller => 'Admin', ssl => 1 };
+      my $inner = { controller => '::User', action => 'show' };
+      $r->with(admin => '/admin', $outer)->add(user => '/user', $inner);
+      $r->with(other => '/other', 'Other')->add(user => '/user', $inner);
+
+      is_deeply $outer, { controller => 'Admin', ssl => 1 };
+      is_deeply $inner, { controller => '::User', action => 'show' };
+      is $r->match('/admin/user')->{controller}, 'Admin::User';
+      is $r->match('/other/user')->{controller}, 'Other::User';
+    };
+
+    it 'keeps its callback out of the routes it adds' => sub {
+      $r->with(a => '/a', 'A', call => sub { $_->add(b => '/b') });
+
+      ok !exists $r->_route('a_b')->{args}{call};
+    };
+
+    it 'starts an empty router of its own from new()' => sub {
+      my $scope = $r->with(a => '/a', 'A')->add(b => '/b');
+      my $fresh = $scope->new;
+
+      is scalar(() = $fresh->routes), 0;
+      $fresh->add(c => '/c', 'C');
+      is $fresh->url('c'), '/c';
+      ok !$r->match('/c');
     };
 
     it 'answers can() for a router method' => sub {
@@ -135,7 +233,7 @@ describe 'Router' => sub {
       ok !$scope->can('no_such_method');
     };
 
-    it 'forwards router methods to the router' => sub {
+    it 'answers every router method itself' => sub {
       my $scope = $r->with(a => '/a', 'A')->add(b => '/b');
 
       is $scope->url('a_b'), '/a/b';

@@ -8,7 +8,7 @@ my $CLASS = 'Router::Right';
 
 use_ok $CLASS;
 
-describe 'Submapper' => sub {
+describe 'with' => sub {
   my $r;
 
   before each => sub {

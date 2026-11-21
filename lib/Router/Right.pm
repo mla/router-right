@@ -35,15 +35,23 @@ sub new {
 
   my $match;
 
-  my $self = bless {
+  # Every scope made by with() shares this table; what differs between them
+  # is the prefix below.
+  my %table = (
     routes      => [],      # routes in insertion order, grouped by path
     route_index => {},      # path => route index of group in above routes[]
     name_index  => {},      # route name => route
     match       => \$match, # route group index of last match
     error       => undef,   # status code of last match
-  }, $class;
+    regex       => undef,   # compiled on first match, dropped by add()
+  );
 
-  return $self;
+  return bless {
+    table => \%table,
+    name  => undef,         # prefix joined to each route name
+    path  => undef,         # prefix joined to each route path
+    args  => {},            # defaults merged under each route's args
+  }, $class;
 }
 
 
@@ -59,7 +67,7 @@ sub _route {
   my $self = shift;
   my $name = shift // croak 'no name supplied';
 
-  return $self->{name_index}{ $name };
+  return $self->{table}{name_index}{ $name };
 }
 
 
@@ -68,7 +76,8 @@ sub _group_index {
   my $self = shift;
   my $path = shift or croak 'no route path supplied';
 
-  return $self->{route_index}{ $path } //= @{ $self->{routes} };
+  my $table = $self->{table};
+  return $table->{route_index}{ $path } //= @{ $table->{routes} };
 }
 
 
@@ -76,11 +85,11 @@ sub error {
   my $self = shift;
 
   if (@_) {
-    $self->{error} = shift;
+    $self->{table}{error} = shift;
     return;
   }
 
-  return $self->{error};
+  return $self->{table}{error};
 }
 
 
@@ -108,12 +117,13 @@ sub _merge_payload {
 
   $payload ||= {};
 
-  my $controller = $add->{controller};
+  my %add = %$add;
+  my $controller = $add{controller};
   if ($controller && $controller =~ /^::/ && $payload->{controller}) {
-    $add->{controller} = $payload->{controller} . $controller;
+    $add{controller} = $payload->{controller} . $controller;
   }
 
-  @{ $payload }{ keys %$add } = values %$add;
+  @{ $payload }{ keys %add } = values %add;
 
   return $payload;
 }
@@ -134,11 +144,6 @@ sub _args {
         grep { defined }
         $self->_list($merged{ $key }, shift @args)
       ];
-    } elsif ($key eq 'name') {
-      $merged{ $key } =
-        join '_', grep { defined } $merged{ $key }, shift @args;
-    } elsif ($key eq 'path') {
-      $merged{ $key } = join '', grep { defined } $merged{ $key }, shift @args;
     } else {
       $merged{ $key } = shift @args;
     }
@@ -265,25 +270,47 @@ sub _build_route {
 }
 
 
+# A route name or path under this scope's prefix. A route with no name stays
+# unnamed whatever the scope is called.
+sub _qualify {
+  my $self = shift;
+  my ($name, $path) = @_;
+
+  $name = join '_', grep { defined && length } $self->{name}, $name
+    if defined $name;
+  $path = join '', grep { defined } $self->{path}, $path;
+
+  return ($name, $path);
+}
+
+
 sub add {
   my $self = shift;
   my $name = shift;
   my $path = shift // croak 'no route path supplied';
-  my %args = $self->_args(@_);
 
-  delete $self->{regex}; # force recompile
+  (my $methods, $path) = $self->_split_route_path($path);
+  ($name, $path) = $self->_qualify($name, $path);
+  length $path or croak 'no route path supplied';
+
+  my %args = $self->_args(
+    %{ $self->{args} },
+    $self->_args(@_),
+    methods => $methods,
+  );
+
+  my $table = $self->{table};
 
   my $payload = delete $args{payload} or croak 'no payload defined';
-  if (defined $name && $self->{name_index}{ $name }) {
+  if (defined $name && $table->{name_index}{ $name }) {
     croak "route '$name' already defined";
   }
 
-  (my $methods, $path) = $self->_split_route_path($path);
-  my @methods = $self->_methods($args{methods}, $methods);
-
-  my $index = $self->_group_index($path);
+  my @methods = $self->_methods($args{methods});
 
   my ($route, $regex) = $self->_build_route($path, \%args);
+
+  my $index = $self->_group_index($path);
 
   local $_ = {
     name    => $name,
@@ -296,11 +323,9 @@ sub add {
     args    => \%args,
   };
 
-  #use Data::Dumper;
-  #warn "Added route '$name' with index '$index': ", Dumper($_), "\n";
-
-  push @{ $self->{routes}[ $index ] ||= [] }, $_;
-  $self->{name_index}{ $name } = $_ if defined $name;
+  push @{ $table->{routes}[ $index ] ||= [] }, $_;
+  $table->{name_index}{ $name } = $_ if defined $name;
+  $table->{regex} = undef; # force recompile
 
   return $self;
 }
@@ -309,7 +334,7 @@ sub add {
 sub _compile {
   my $self = shift;
 
-  my @routes = @{ $self->{routes} };
+  my @routes = @{ $self->{table}{routes} };
   @routes or return qr/(?!)/; # pattern can never match
 
   # Tested faster to terminate each route with \z rather than placing
@@ -334,17 +359,18 @@ sub match {
   my $path   = shift;
   my $method = shift;
 
-  my $regex = $self->{regex} ||= $self->_compile;
+  my $table = $self->{table};
+  my $regex = $table->{regex} ||= $self->_compile;
 
-  my $match = $self->{match};
+  my $match = $table->{match};
   $$match = undef;
-  $self->{error} = undef;
+  $table->{error} = undef;
 
   local $MATCHED;
   $path =~ /$regex/ or return $self->error(NOT_FOUND);
 
   $$match = $MATCHED // croak 'route matched, but no group index was set';
-  my $routes = $self->{routes}[ $$match ]
+  my $routes = $table->{routes}[ $$match ]
     or croak "no route defined for match index '$$match'?!";
 
   my $matched_route;
@@ -409,7 +435,7 @@ sub url {
   tie %args, 'Tie::IxHash', @_;
 
   my @route;
-  if (my $route = $self->{name_index}{ $name }) {
+  if (my $route = $self->{table}{name_index}{ $name }) {
     @route = @{ $route->{route} };    
   } elsif ($name =~ m{^/}) { # url, not a route name
     if ($name =~ /{/) { # has placeholders? if so, need to parse it
@@ -466,40 +492,60 @@ sub url {
 sub _resolve_param { $_[2] }
 
 
-sub _submapper_class { 'Router::Right::Submapper' }
-
-
 sub with {
   my $self = shift;
+  my $name = shift;
+  my $path = shift;
+  my %args = $self->_args(@_);
 
-  return $self->_submapper_class->new(
-    $self,
-    @_,
-  );
+  my $call = delete $args{call};
+
+  (my $methods, $path) = $self->_split_route_path($path);
+  ($name, $path) = $self->_qualify($name // '', $path);
+
+  my $scope = bless {
+    table => $self->{table},
+    name  => $name,
+    path  => $path,
+    args  => scalar $self->_args(
+      %{ $self->{args} },
+      %args,
+      methods => $methods,
+    ),
+  }, ref $self;
+
+  if ($call) {
+    local $_ = $scope;
+    $call->($scope);
+  }
+
+  return $scope;
 }
 
 
 sub allowed_methods {
   my $self = shift;
 
+  my $table = $self->{table};
+
   my $index;
   if (@_) {
     my $path;
     if ($_[0] !~ m{/}) { # route name, not path
       my $name = shift;
-      my $route = $self->{name_index}{ $name } or return;
+      my $route = $table->{name_index}{ $name } or return;
       $path = $route->{path};
     } else {
       $path = shift;
     }
 
-    $index = $self->{route_index}{ $path };
+    $index = $table->{route_index}{ $path };
   } else {
-    $index = ${ $self->{match} };
+    $index = ${ $table->{match} };
   }
   defined $index or return;
 
-  my $routes = $self->{routes}[ $index ]
+  my $routes = $table->{routes}[ $index ]
     or croak "no routes found for index '$index'?!";
 
   my $allowed = $self->_methods(map { $_->{methods} } @$routes);
@@ -510,7 +556,7 @@ sub allowed_methods {
 sub routes {
   my $self = shift;
 
-  return map { @$_ } @{ $self->{routes} };
+  return map { @$_ } @{ $self->{table}{routes} };
 }
 
 
@@ -559,7 +605,7 @@ sub resource {
 
   my $undef = undef;
 
-  $self->with($args{name}, $args{path}, %args, call => sub {
+  $self->with(delete $args{name}, delete $args{path}, %args, call => sub {
     $_->add(
       $collection_name => "GET /$collection\{.format}",
       { action => 'index' },
@@ -617,125 +663,6 @@ sub resource {
   });
 
   return $self;
-}
-
-
-package Router::Right::Submapper;
-
-use strict;
-use warnings;
-use Carp;
-
-sub new {
-  my $class  = shift;
-  my $parent = shift or croak 'no parent supplied';
-  my $name   = shift;
-  my $route  = shift;
-  my %args   = $parent->_args(@_);
-
-  (my $methods, $route) = $parent->_split_route_path($route);
-  $args{methods} = [ $parent->_methods($args{methods}, $methods) ];
-
-  $class = ref($class) || $class;
-  my $self = bless {
-    parent => $parent,
-    name   => $name,
-    route  => $route,
-    args   => \%args,
-  }, $class;
-
-  if (my $func = $args{call}) {
-    local $_ = $self;
-    $func->($self);
-  }
-
-  return $self;
-}
-
-
-sub _parent {
-  my $self = shift;
-
-  my $parent = $self->{parent} or croak 'no parent defined?!';
-  return $parent;
-}
-
-
-sub add {
-  my $self  = shift;
-  my $name  = shift;
-  my $route = shift // croak 'no route supplied';
-
-  my $parent = $self->_parent;
-
-  (my $methods, $route) = $parent->_split_route_path($route);
-
-  $name  = join '_',
-    grep { defined && length } $self->{name}, $name if defined $name;
-  $route = join '', grep { defined } $self->{route}, $route;
-
-  $parent->add(
-    $name,
-    $route,
-    %{ $self->{args} },
-    $parent->_args(@_, methods => $methods),
-  );
-
-  return $self;
-}
-
-
-sub resource {
-  my $self = shift;
-  my $member = shift or croak 'no resource member name supplied';
-
-  my $parent = $self->_parent;
-
-  $parent->resource(
-    $member,
-    name => $self->{name},
-    path => $self->{route},
-    %{ $self->{args} },
-    $parent->_args(@_),
-  );
-
-  return $self;
-}
-
-
-# nested submapper
-sub with {
-  my $self = shift;
-
-  $self->new($self, @_);
-}
-
-
-sub DESTROY {}
-
-
-# AUTOLOAD forwards to the parent, so can() has to look there too.
-sub can {
-  my $self   = shift;
-  my $method = shift;
-
-  my $code = $self->SUPER::can($method);
-  return $code if $code || !ref $self;
-
-  $self->_parent->can($method) or return;
-  return sub { shift->_parent->$method(@_) };
-}
-
-
-# Forward unknown methods to parent instance
-sub AUTOLOAD {
-  my $self = shift;
-
-  my $method = our $AUTOLOAD;
-  $method =~ s/.*:://;
-
-  my $parent = $self->_parent;
-  $parent->$method(@_);
 }
 
 
@@ -908,7 +835,9 @@ Returns a report of the defined routes, in order of definition.
 
 =item with($name => $route_path [, %options]
 
-Helper method to share information across multiple routes. For example:
+Returns a scope: a router of the same class that adds to the same routes,
+with $name, $route_path and the options applied to everything added through
+it. For example:
 
   $r->with(admin => '/admin',        'Admin')
     ->add(users  => '/users',        '#users')
@@ -951,7 +880,13 @@ A callback is accepted, which allows chaining with() calls:
   #   admin_log            * /admin/log
   #   admin_dashboard_view * /admin/dashboard/{action}
 
-Within the callback function, $_ is set to the router instance. It is also supplied as a parameter.
+Within the callback function, $_ is set to the scope. It is also supplied as a parameter.
+
+A scope answers every router method. match(), url() and the rest act on the
+whole set of routes, whichever scope they are called on, and a scope made by
+a subclass is an instance of that subclass. Scopes nest: calling with() on a
+scope joins the names with an underscore, concatenates the paths and merges
+the options.
 
 =item resource($name, \%payload [, %options])
 

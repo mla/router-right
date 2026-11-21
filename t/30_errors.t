@@ -72,6 +72,11 @@ describe 'Router' => sub {
       ok !$r->match('/foo/1');
     };
 
+    it 'refuses an empty path outside a scope' => sub {
+      eval { $r->add(foo => '', 'Foo') };
+      like $@, qr/no route path supplied/;
+    };
+
     it 'keeps working after a refused route' => sub {
       eval { $r->add(bad => '/bad/{a/b}', 'Bad') };
       $r->add(ok => '/ok', 'OK');
@@ -160,7 +165,7 @@ describe 'Router' => sub {
   describe 'with' => sub {
     it 'refuses a nested route with no path' => sub {
       eval { $r->with(admin => '/admin', 'Admin')->add('users') };
-      like $@, qr/no route supplied/;
+      like $@, qr/no route path supplied/;
     };
 
     it 'refuses a nested route that repeats a name' => sub {
