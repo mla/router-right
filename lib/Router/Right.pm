@@ -375,6 +375,7 @@ sub url {
     my $pval;
     if (exists $args{ $pname }) {
       $pval = delete $args{ $pname } // '';
+      $pval = $self->_resolve_param($pname, $pval);
       $pval =~ /$_->{regex}/
         or croak "invalid value for param '$pname' in url '$name': '$pval'";
     } else {
@@ -397,6 +398,14 @@ sub url {
 
   return $uri;
 }
+
+
+# Hook for subclasses to transform parameter values before URL
+# generation. Called for each placeholder parameter. Override to
+# implement object deflation, type coercion, etc.
+#
+#  my ($self, $pname, $pval) = @_;
+sub _resolve_param { $_[2] }
 
 
 sub _submapper_class { 'Router::Right::Submapper' }
@@ -440,12 +449,19 @@ sub allowed_methods {
 }
 
 
+sub routes {
+  my $self = shift;
+
+  return map { @$_ } @{ $self->{routes} };
+}
+
+
 sub as_string {
   my $self = shift;
 
   my @routes;
   my %max = (name => 0, method => 0, path => 0);
-  foreach (map { @$_ } @{ $self->{routes} }) {
+  foreach ($self->routes) {
     my $name    = $_->{name} // '';
 
     my $methods = join ',', @{ $_->{methods} };
@@ -761,11 +777,11 @@ Attempts to find a route that matches the supplied $url. Routes are matched in t
 
 If a match is found, its associated payload is returned. If not, undef is returned and the error() method will indicate why the match failed.
 
-$method, if supplied, is the HTTP method of the request (e.g., GET, POST, etc.). Specifying $method may prevent a route from otherwise matching if the route was defined with a restricted set of allowed methods (see ROUTE DEFINITION). By default, all request methods are allowed.
-
 While the payload is always a hash reference, starting with version 1.05,
 it is also blessed into the Router::Right::Match class, which provides
 access to the route definition that resulted in the match.
+
+$method, if supplied, is the HTTP method of the request (e.g., GET, POST, etc.). Specifying $method may prevent a route from otherwise matching if the route was defined with a restricted set of allowed methods (see ROUTE DEFINITION). By default, all request methods are allowed.
 
 =item error()
 
@@ -801,6 +817,13 @@ Example:
   $r->url('entry', year => '1916', q => 'abc'); # produces /entries/1916?q=abc 
 
 The return value is a L<URI> instance.
+
+=item routes()
+
+Returns the defined routes as hash references with C<name>, C<path>,
+C<methods>, C<payload> and C<route> (the parsed path), grouped by path:
+paths in the order each was first defined, and the routes on one path in
+the order they were added. Treat them as read-only.
 
 =item as_string()
 
