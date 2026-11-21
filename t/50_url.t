@@ -66,6 +66,45 @@ describe 'Router url' => sub {
     is $r->url('user', id => 'a b'), '/users/a%20b';
   };
 
+  it 'escapes what would end or break the path' => sub {
+    is $r->url('user', id => 'a?b'), '/users/a%3Fb';
+    is $r->url('user', id => 'a#b'), '/users/a%23b';
+    is $r->url('user', id => '100%'), '/users/100%25';
+  };
+
+  it 'leaves characters a path segment may hold' => sub {
+    is $r->url('user', id => q{a-b.c_d~e!f$g&h'i(j)k*l+m,n;o=p:q@r}),
+      q{/users/a-b.c_d~e!f$g&h'i(j)k*l+m,n;o=p:q@r};
+  };
+
+  it 'encodes a character value as UTF-8' => sub {
+    is $r->url('user', id => "caf\x{e9}"), '/users/caf%C3%A9';
+    is $r->url('user', id => "\x{2603}"), '/users/%E2%98%83';
+  };
+
+  it 'keeps the slashes a spanning placeholder holds' => sub {
+    $r->add(file => '/files/{path:.+}', 'File');
+
+    is $r->url('file', path => 'a/b c/d.txt'), '/files/a/b%20c/d.txt';
+  };
+
+  it 'builds a path that matches back to the same value' => sub {
+    foreach my $id ('a?b', 'a#b', '100%', 'a b', "caf\x{e9}") {
+      my $url   = $r->url('user', id => $id);
+      my $match = $r->match($url->path);
+      (my $got = $match->{id}) =~ s/%([0-9A-Fa-f]{2})/chr hex $1/ge;
+      utf8::decode($got);
+
+      is $got, $id, "id '$id'";
+    }
+  };
+
+  it 'accepts a route named 0' => sub {
+    $r->add(0 => '/zero', 'Zero');
+
+    is $r->url(0), '/zero';
+  };
+
   it 'does not change the route it reads' => sub {
     my $before = $r->as_string;
     $r->url('user', id => 7, q => 1);
@@ -100,6 +139,11 @@ describe 'Router url' => sub {
   describe 'format placeholder' => sub {
     before each => sub {
       $r->add(dl => '/dl/{file}{.format}', 'Download');
+    };
+
+    it 'is dropped when passed undefined or empty' => sub {
+      is $r->url('dl', file => 'foo', format => undef), '/dl/foo';
+      is $r->url('dl', file => 'foo', format => ''), '/dl/foo';
     };
 
     it 'is dropped when not passed' => sub {

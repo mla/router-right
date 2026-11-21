@@ -136,6 +136,17 @@ describe 'Router' => sub {
         { controller => 'Range', from => 10, to => 20 };
     };
 
+    it 'accepts braces in a pattern' => sub {
+      $r->add(code => '/c/{code:\d{3}}', 'Code');
+      $r->add(pair => '/p/{pair:[a-z]{1,2}-\d{2,}}', 'Pair');
+
+      ok $r->match('/c/123');
+      ok !$r->match('/c/12');
+      ok !$r->match('/c/1234');
+      is $r->match('/p/ab-123')->{pair}, 'ab-123';
+      is $r->url('code', code => 123), '/c/123';
+    };
+
     it 'accepts alternation in a pattern' => sub {
       $r->add(kind => '/k/{kind:booking|posting}/{id}', 'Kind');
 
@@ -302,6 +313,18 @@ describe 'Router' => sub {
       is $match->path, '/e/{id}';
       is_deeply $match->methods, ['GET'];
       is_deeply $match->payload, { controller => 'Entry', action => 'show' };
+    };
+
+    it 'refuses an unknown method' => sub {
+      eval { $r->match('/e/1')->no_such_field };
+      like $@, qr/no_such_field/;
+    };
+
+    it 'answers can() for each route field' => sub {
+      my $match = $r->match('/e/1');
+
+      ok $match->can($_), $_
+        foreach qw/ name path methods payload route index regex args /;
     };
 
     it 'keeps each result tied to its own route' => sub {

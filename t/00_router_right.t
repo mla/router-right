@@ -91,7 +91,7 @@ describe 'Router' => sub {
       my $match = $r->match('/');
 
       is_deeply $match, $payload;
-      is_blessed $match, 'Router::Right::Match', 'match is blessed instance';
+      isa_ok $match, 'Router::Right::Match', 'match';
 
       is_deeply $r->match('/'), $payload, 'cached regex';
     };

@@ -1,13 +1,11 @@
 #!/usr/bin/env perl
 
-# Two kinds of test, both about behaviour that is expected to change.
+# Behaviour pinned as it is today where the right behaviour is a design
+# decision. Changing one of these should be deliberate; once it is decided,
+# the test moves to the file for its subject.
 #
-# "defects" assert the behaviour wanted and are marked TODO: they fail
-# today, and each one passing unexpectedly is the signal to move it into
-# the file for its subject.
-#
-# "undecided" pin what the code does today where the right behaviour is a
-# design decision. Changing one of these should be deliberate.
+# A known defect goes here as a TODO test asserting the behaviour wanted, so
+# its fix shows up as an unexpected pass.
 
 use strict;
 use warnings;
@@ -16,121 +14,6 @@ use Test::Spec;
 my $CLASS = 'Router::Right';
 
 use_ok $CLASS;
-
-{
-  package Router::Right::Test::Scoped;
-  use parent -norequire, 'Router::Right';
-  sub _submapper_class { 'Router::Right::Test::Scoped::Submapper' }
-
-  package Router::Right::Test::Scoped::Submapper;
-  use parent -norequire, 'Router::Right::Submapper';
-}
-
-describe 'defects' => sub {
-  my $r;
-
-  before each => sub {
-    $r = $CLASS->new;
-  };
-
-  it 'url checks the whole placeholder value against its pattern' => sub {
-    local $TODO = 'pattern is applied unanchored';
-    $r->add(num => '/n/{id:\d+}', 'Num');
-
-    eval { $r->url('num', id => 'abc1') };
-    like $@, qr/invalid value for param 'id'/;
-  };
-
-  it 'url builds a path that matches back to the same value' => sub {
-    local $TODO = 'placeholder values are not escaped';
-    $r->add(user => '/users/{id}', 'User');
-
-    foreach my $id ('a?b', 'a#b') {
-      my $url   = eval { $r->url('user', id => $id) };
-      my $match = $url && $r->match($url->path);
-      (my $got = $match ? $match->{id} : '') =~ s/%([0-9A-Fa-f]{2})/chr hex $1/ge;
-
-      is $got, $id, "id '$id'";
-    }
-  };
-
-  it 'url refuses a slash in a placeholder that cannot hold one' => sub {
-    local $TODO = 'pattern is applied unanchored';
-    $r->add(user => '/users/{id}', 'User');
-
-    eval { $r->url('user', id => 'a/b') };
-    like $@, qr/invalid value for param 'id'/;
-  };
-
-  it 'url drops an optional format passed undefined or empty' => sub {
-    local $TODO = 'an empty value is checked against the pattern';
-    $r->add(dl => '/dl/{file}{.format}', 'Download');
-
-    is eval { $r->url('dl', file => 'foo', format => undef) }, '/dl/foo';
-    is eval { $r->url('dl', file => 'foo', format => '') }, '/dl/foo';
-  };
-
-  it 'url refuses a format the route could not match back' => sub {
-    local $TODO = 'pattern is applied unanchored';
-    $r->add(dl => '/dl/{file}{.format}', 'Download');
-
-    eval { $r->url('dl', file => 'foo', format => 'tar.gz') };
-    like $@, qr/invalid value for param 'format'/;
-  };
-
-  it 'accepts a quantifier in a placeholder pattern' => sub {
-    local $TODO = 'placeholder ends at the first closing brace';
-    my $ok = eval {
-      $r->add(code => '/c/{code:\d{3}}', 'Code');
-      $r->match('/c/123') && !$r->match('/c/12');
-    };
-
-    ok $ok, 'matches three digits only';
-  };
-
-  it 'reports a bad placeholder pattern when the route is added' => sub {
-    local $TODO = 'pattern is first compiled by match()';
-    eval { $r->add(bad => '/b/{id:(}', 'Bad') };
-
-    like $@, qr/placeholder|pattern/;
-  };
-
-  it 'uses the submapper class the router names' => sub {
-    local $TODO = 'Submapper::new blesses into its own package';
-    my $scoped = Router::Right::Test::Scoped->new;
-
-    isa_ok $scoped->with(a => '/a', 'A'),
-      'Router::Right::Test::Scoped::Submapper';
-  };
-
-  it 'answers can() for a router method called on a scope' => sub {
-    local $TODO = 'forwarded through AUTOLOAD';
-
-    ok $r->with(a => '/a', 'A')->can('url');
-  };
-
-  it 'refuses an unknown method on a match' => sub {
-    local $TODO = 'AUTOLOAD returns undef for any name';
-    $r->add(foo => '/foo', 'Foo');
-
-    eval { $r->match('/foo')->no_such_field };
-    like $@, qr/no_such_field/;
-  };
-
-  it 'answers can() for a route field on a match' => sub {
-    local $TODO = 'fields are served through AUTOLOAD';
-    $r->add(foo => '/foo', 'Foo');
-
-    ok $r->match('/foo')->can('name');
-  };
-
-  it 'accepts a route named 0' => sub {
-    local $TODO = 'name is tested for truth';
-    $r->add(0 => '/zero', 'Zero');
-
-    is eval { $r->url(0) }, '/zero';
-  };
-};
 
 describe 'undecided' => sub {
   my $r;

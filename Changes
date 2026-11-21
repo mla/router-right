@@ -1,3 +1,31 @@
+1.06 (unreleased)
+
+  - url() checks each placeholder value against its whole pattern;
+    {id:\d+} no longer accepts 'abc1', and {id} refuses a slash.
+
+  - url() percent-encodes placeholder values as UTF-8. '?', '#', '%',
+    spaces and non-ASCII characters were passed through or encoded as
+    Latin-1, so the URL matched a different value or none. A caller that
+    escaped values itself now gets them escaped twice.
+
+  - url() leaves out an optional placeholder passed as undef or ''.
+
+  - A placeholder pattern may contain balanced braces ({code:\d{3}}).
+    A pattern that does not compile, an unbalanced brace, or a placeholder
+    name that is not an identifier is refused when the route is added.
+
+  - Router::Right::Match has real accessors for the route fields. Any
+    other method name dies instead of returning undef, and can() answers
+    for the fields.
+
+  - with() honours _submapper_class(), and a scope's can() finds the
+    router methods it forwards.
+
+  - A route may be named 0.
+
+  - routes() lists the defined routes; _resolve_param() lets a subclass
+    turn a placeholder value into a string before url() checks it.
+
 1.05 Feb 12, 2024
 
   - IMPORTANT! Note potential non-backwards compatible change:

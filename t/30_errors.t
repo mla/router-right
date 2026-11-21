@@ -45,6 +45,33 @@ describe 'Router' => sub {
         like $@, qr/placeholder 'format' redefined/;
       };
 
+    it 'refuses a placeholder name that is not an identifier' => sub {
+      foreach my $name ('a-b', '1st', 'a b') {
+        eval { $r->add(foo => "/foo/{$name}", 'Foo') };
+        like $@, qr/invalid placeholder name '\Q$name\E'/, "'$name'";
+      }
+    };
+
+    it 'refuses an unbalanced brace' => sub {
+      eval { $r->add(foo => '/foo/{id', 'Foo') };
+      like $@, qr/unbalanced brace in route path '\/foo\/\{id'/;
+
+      eval { $r->add(bar => '/bar/{id:\d{3}', 'Bar') };
+      like $@, qr/unbalanced brace/;
+    };
+
+    it 'refuses a placeholder pattern that does not compile' => sub {
+      eval { $r->add(foo => '/foo/{id:(}', 'Foo') };
+      like $@, qr/invalid pattern for placeholder 'id'/;
+    };
+
+    it 'refuses a bad pattern before the route is stored' => sub {
+      eval { $r->add(foo => '/foo/{id:(}', 'Foo') };
+
+      is scalar(() = $r->routes), 0;
+      ok !$r->match('/foo/1');
+    };
+
     it 'keeps working after a refused route' => sub {
       eval { $r->add(bad => '/bad/{a/b}', 'Bad') };
       $r->add(ok => '/ok', 'OK');
@@ -81,6 +108,27 @@ describe 'Router' => sub {
 
       eval { $r->url('entry', year => undef) };
       like $@, qr/invalid value for param 'year'/;
+    };
+
+    it 'refuses a value its pattern matches only in part' => sub {
+      $r->add(num => '/n/{id:\d+}', 'Num');
+
+      eval { $r->url('num', id => 'abc1') };
+      like $@, qr/invalid value for param 'id'/;
+    };
+
+    it 'refuses a slash in a placeholder that cannot hold one' => sub {
+      $r->add(user => '/users/{id}', 'User');
+
+      eval { $r->url('user', id => 'a/b') };
+      like $@, qr/invalid value for param 'id'/;
+    };
+
+    it 'refuses a format the route could not match back' => sub {
+      $r->add(dl => '/dl/{file}{.format}', 'Download');
+
+      eval { $r->url('dl', file => 'foo', format => 'tar.gz') };
+      like $@, qr/invalid value for param 'format'/;
     };
 
     it 'refuses an empty placeholder value' => sub {

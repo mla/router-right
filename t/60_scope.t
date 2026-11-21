@@ -11,6 +11,15 @@ my $CLASS = 'Router::Right';
 
 use_ok $CLASS;
 
+{
+  package Router::Right::Test::Scoped;
+  use parent -norequire, 'Router::Right';
+  sub _submapper_class { 'Router::Right::Test::Scoped::Submapper' }
+
+  package Router::Right::Test::Scoped::Submapper;
+  use parent -norequire, 'Router::Right::Submapper';
+}
+
 describe 'Router' => sub {
   my $r;
 
@@ -106,6 +115,24 @@ describe 'Router' => sub {
 
       is $scope->add(b => '/b'), $scope;
       is $scope->resource('thing', '::Thing'), $scope;
+    };
+
+    it 'is built from the submapper class the router names' => sub {
+      my $scoped = Router::Right::Test::Scoped->new;
+
+      isa_ok $scoped->with(a => '/a', 'A'),
+        'Router::Right::Test::Scoped::Submapper';
+      isa_ok $scoped->with(a => '/a', 'A')->with(b => '/b'),
+        'Router::Right::Test::Scoped::Submapper';
+    };
+
+    it 'answers can() for a router method' => sub {
+      my $scope = $r->with(a => '/a', 'A')->add(b => '/b');
+
+      my $url = $scope->can('url');
+      ok $url;
+      is $scope->$url('a_b'), '/a/b';
+      ok !$scope->can('no_such_method');
     };
 
     it 'forwards router methods to the router' => sub {

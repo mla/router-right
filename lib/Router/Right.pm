@@ -11,6 +11,7 @@ use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
 use Tie::IxHash;
 use URI;
+use URI::Escape qw/ uri_escape_utf8 /;
 use URI::QueryParam;
 
 our $VERSION = 1.05;
@@ -52,7 +53,7 @@ sub _list {
 # mainly for testing right now
 sub _route {
   my $self = shift;
-  my $name = shift or croak 'no name supplied';
+  my $name = shift // croak 'no name supplied';
 
   return $self->{name_index}{ $name };
 }
@@ -172,20 +173,53 @@ sub _methods {
 }
 
 
+# A placeholder's pattern may hold braces of its own ({id:\d{3}}), as long
+# as they balance.
+my $PLACEHOLDER = qr/
+  \{ ( (?: [^{}]++ | ( \{ (?: [^{}]++ | (?-1) )*+ \} ) )*+ ) \}
+/x;
+
+
+# Alternating literals and placeholder specs, starting with a literal that
+# is empty when the path opens with a placeholder.
+sub _split_placeholders {
+  my $class = shift;
+  my $route = shift;
+
+  my @parts;
+  my $literal = '';
+  pos($route) = 0;
+  while (pos($route) < length $route) {
+    if ($route =~ /\G([^{]+)/gc) {
+      $literal .= $1;
+    } elsif ($route =~ /\G$PLACEHOLDER/gc) {
+      push @parts, $literal, $1;
+      $literal = '';
+    } else {
+      croak "unbalanced brace in route path '$route'";
+    }
+  }
+  push @parts, $literal if length $literal;
+
+  return @parts;
+}
+
+
 sub _build_route {
   my $class = shift;
   my $route = shift or croak 'no route supplied';
   my $args  = shift or croak 'no args supplied';
 
-  my @route = split /{([^}]+)}/, $route;
+  my @route = $class->_split_placeholders($route);
   my @regex;
   my $is_placeholder = 0;
   my %placeholders;
   foreach (@route) {
     if ($is_placeholder) {
-      /^([^:]+):?(.*)$/ or croak "invalid placeholder '$_'";
+      /^([^:]+):?(.*)$/s or croak "invalid placeholder '$_'";
       my ($pname, $regex) = ($1, $2);
-      croak "invalid placeholder name '$pname'" if $pname =~ m{/};
+      $pname =~ /\A(?:\.format|[A-Za-z_]\w*)\z/
+        or croak "invalid placeholder name '$pname'";
 
       my $optional = 0;
       my $pre = '';  # match before placeholder content
@@ -203,9 +237,13 @@ sub _build_route {
 
       croak "placeholder '$pname' redefined" if $placeholders{ $pname }++;
 
+      my $check = eval { qr/\A(?:$regex)\z/ }
+        or croak "invalid pattern for placeholder '$pname': $@";
+
       $_ = {
         pname    => $pname,
         regex    => $regex,
+        check    => $check,
         optional => $optional,
         type     => $type,
       };
@@ -341,9 +379,15 @@ sub match {
 }
 
 
+# Characters a path segment may carry as they are (RFC 3986 pchar), plus the
+# slash, which only a placeholder whose pattern admits it can receive.
+my $PATH_UNSAFE = q{^A-Za-z0-9\-._~!$&'()*+,;=:@/};
+
+
 sub url {
   my $self = shift;
-  my $name = shift or croak 'no url name supplied';
+  my $name = shift;
+  defined $name && length $name or croak 'no url name supplied';
 
   my %args;
   tie %args, 'Tie::IxHash', @_;
@@ -372,21 +416,19 @@ sub url {
 
     my $pname = $_->{pname};
 
-    my $pval;
-    if (exists $args{ $pname }) {
-      $pval = delete $args{ $pname } // '';
-      $pval = $self->_resolve_param($pname, $pval);
-      $pval =~ /$_->{regex}/
-        or croak "invalid value for param '$pname' in url '$name': '$pval'";
-    } else {
-      $_->{optional}
-        or croak "required param '$pname' missing from url '$name'";
-    }
-    $pval //= '';
+    my $supplied = exists $args{ $pname };
+    $supplied || $_->{optional}
+      or croak "required param '$pname' missing from url '$name'";
 
-    if ($pname eq 'format' && $_->{type} eq '.' && length $pval) {
-      $pval = ".$pval";
-    }
+    my $pval = delete $args{ $pname } // '';
+    $pval = $self->_resolve_param($pname, $pval) // '' if $supplied;
+    next if $_->{optional} && !length $pval;
+
+    $pval =~ $_->{check}
+      or croak "invalid value for param '$pname' in url '$name': '$pval'";
+
+    $pval = uri_escape_utf8($pval, $PATH_UNSAFE);
+    $pval = ".$pval" if $_->{type} eq '.';
 
     push @path, $pval;
   } continue {
@@ -584,7 +626,7 @@ sub new {
     name   => $name,
     route  => $route,
     args   => \%args,
-  };
+  }, $class;
 
   if (my $func = $args{call}) {
     local $_ = $self;
@@ -656,7 +698,20 @@ sub with {
 sub DESTROY {}
 
 
-# Forward unknown methods to parent instance 
+# AUTOLOAD forwards to the parent, so can() has to look there too.
+sub can {
+  my $self   = shift;
+  my $method = shift;
+
+  my $code = $self->SUPER::can($method);
+  return $code if $code || !ref $self;
+
+  $self->_parent->can($method) or return;
+  return sub { shift->_parent->$method(@_) };
+}
+
+
+# Forward unknown methods to parent instance
 sub AUTOLOAD {
   my $self = shift;
 
@@ -695,14 +750,12 @@ sub new {
 }
 
 
-sub AUTOLOAD {
-  my $self = shift;
-
-  my $field = our $AUTOLOAD;
-  $field =~ s/.*:://;
-
-  my $route = $routes{ $self } or return;
-  return $route->{ $field };
+foreach my $field (qw/ name path methods payload route index regex args /) {
+  no strict 'refs';
+  *{ $field } = sub {
+    my $route = $routes{ $_[0] } or return;
+    return $route->{ $field };
+  };
 }
 
 
@@ -779,7 +832,9 @@ If a match is found, its associated payload is returned. If not, undef is return
 
 While the payload is always a hash reference, starting with version 1.05,
 it is also blessed into the Router::Right::Match class, which provides
-access to the route definition that resulted in the match.
+access to the route definition that resulted in the match through the
+methods C<name>, C<path>, C<methods>, C<payload>, C<route>, C<index>,
+C<regex> and C<args>. Any other method name dies.
 
 $method, if supplied, is the HTTP method of the request (e.g., GET, POST, etc.). Specifying $method may prevent a route from otherwise matching if the route was defined with a restricted set of allowed methods (see ROUTE DEFINITION). By default, all request methods are allowed.
 
@@ -815,6 +870,12 @@ Example:
 
   $r->add(entry => '/entries/{year}', { controller => 'Entry' });
   $r->url('entry', year => '1916', q => 'abc'); # produces /entries/1916?q=abc 
+
+Each placeholder value must match the placeholder's whole pattern, or url()
+dies. Values are percent-encoded as UTF-8, except for the characters a path
+segment may carry as they are and the forward slash, which only a placeholder
+whose pattern admits it will accept. An optional placeholder passed as undef
+or an empty string is left out.
 
 The return value is a L<URI> instance.
 
@@ -906,13 +967,20 @@ A route path is a normal URL path with the addition of placeholder variables. Fo
 
 defines a route path containing two placeholders, "year" and "month'. By default, a placeholder matches any string up to the next forward slash.
 
-Placeholder names must not begin with a number, nor contain hyphens or forward slashes.
+A placeholder name is a letter or underscore followed by letters, digits or
+underscores.
 
 The default match rule may be overridden. For example:
 
   $r->add(entries => '/entries/{year:\d+}/{month:\d+}');
 
 is the same as above, except it will only match if both the year and month contain only digits.
+
+A pattern may contain braces of its own, as long as they balance:
+
+  $r->add(code => '/codes/{code:[A-Z]{3}}');
+
+A pattern that does not compile is reported when the route is added.
 
 The special {.format} placeholder can be used to allow an optional file extension to be appended. For example:
 
