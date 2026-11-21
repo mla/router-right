@@ -11,7 +11,6 @@ use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
 use Tie::IxHash;
 use URI;
-use URI::Escape qw/ uri_escape_utf8 /;
 use URI::QueryParam;
 
 our $VERSION = 1.05;
@@ -385,7 +384,20 @@ sub match {
 
 # Characters a path segment may carry as they are (RFC 3986 pchar), plus the
 # slash, which only a placeholder whose pattern admits it can receive.
-my $PATH_UNSAFE = q{^A-Za-z0-9\-._~!$&'()*+,;=:@/};
+# Not handed to URI::Escape: its 3.31 (URI 1.72) compiles a custom class in a
+# string eval, so '$&' and '@/' here interpolated as variables.
+my $PATH_UNSAFE = qr{([^A-Za-z0-9\-._~!\$&'()*+,;=:\@/])};
+
+
+sub _escape_path {
+  my $class = shift;
+  my $value = shift;
+
+  utf8::encode($value);
+  $value =~ s/$PATH_UNSAFE/sprintf '%%%02X', ord $1/ge;
+
+  return $value;
+}
 
 
 sub url {
@@ -431,7 +443,7 @@ sub url {
     $pval =~ $_->{check}
       or croak "invalid value for param '$pname' in url '$name': '$pval'";
 
-    $pval = uri_escape_utf8($pval, $PATH_UNSAFE);
+    $pval = $self->_escape_path($pval);
     $pval = ".$pval" if $_->{type} eq '.';
 
     push @path, $pval;

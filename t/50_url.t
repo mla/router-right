@@ -72,6 +72,13 @@ describe 'Router url' => sub {
     is $r->url('user', id => '100%'), '/users/100%25';
   };
 
+  it 'escapes the same whatever the last regex matched' => sub {
+    foreach my $last ('my-post', 'x', '$') {
+      $last =~ /.+/;
+      is $r->url('user', id => 'a$b&c'), '/users/a$b&c', "after '$last'";
+    }
+  };
+
   it 'leaves characters a path segment may hold' => sub {
     is $r->url('user', id => q{a-b.c_d~e!f$g&h'i(j)k*l+m,n;o=p:q@r}),
       q{/users/a-b.c_d~e!f$g&h'i(j)k*l+m,n;o=p:q@r};

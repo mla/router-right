@@ -10,7 +10,9 @@
   - url() percent-encodes placeholder values as UTF-8. '?', '#', '%',
     spaces and non-ASCII characters were passed through or encoded as
     Latin-1, so the URL matched a different value or none. A caller that
-    escaped values itself now gets them escaped twice.
+    escaped values itself now gets them escaped twice. The escaping is
+    done here rather than by URI::Escape, whose older releases mangle a
+    custom character class.
 
   - url() leaves out an optional placeholder passed as undef or ''.
 

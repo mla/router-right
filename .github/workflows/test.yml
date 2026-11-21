@@ -20,6 +20,18 @@ jobs:
       - run: cpanm --quiet --notest --installdeps --with-test .
       - run: prove -lr t
 
+  old-uri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.42'
+      - run: cpanm --quiet --notest --installdeps --with-test .
+      - run: cpanm --quiet --notest URI@1.72
+      - run: perl -MURI -e 'print "URI $URI::VERSION\n"'
+      - run: prove -lr t
+
   coverage:
     runs-on: ubuntu-latest
     steps:
