@@ -7,22 +7,26 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    container: perl:${{ matrix.perl }}
     strategy:
       fail-fast: false
       matrix:
-        perl: ['5.20', '5.26', '5.30', '5.34', '5.38', '5.40', '5.42']
+        perl: ['5.10', '5.14', '5.20', '5.26', '5.30', '5.34', '5.38', '5.40', '5.42']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
       - run: perl -V
       - run: cpanm --quiet --notest --installdeps --with-test .
       - run: prove -lr t
 
   coverage:
     runs-on: ubuntu-latest
-    container: perl:5.42
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.42'
       - run: cpanm --quiet --notest --installdeps --with-test --with-develop .
       - run: HARNESS_PERL_SWITCHES=-MDevel::Cover=+ignore,^t/ prove -lr t
       - run: cover -report text -select_re '^lib/' | tee coverage.txt
