@@ -1,5 +1,9 @@
 1.06 (unreleased)
 
+  - match() works on Perl 5.10 to 5.16. It recorded the matching route
+    through a closure inside the regex, which those versions do not bind,
+    so every path matched the first route defined.
+
   - url() checks each placeholder value against its whole pattern;
     {id:\d+} no longer accepts 'abc1', and {id} refuses a slash.
 

@@ -23,6 +23,11 @@ our @EXPORT_OK = qw/ NOT_FOUND METHOD_NOT_ALLOWED /;
 sub NOT_FOUND          () { 404 }
 sub METHOD_NOT_ALLOWED () { 405 }
 
+# Set by the compiled regex to the index of the route group that matched. A
+# package variable, not a closure: before 5.18 a code block in a regex built
+# at run time does not see the lexicals around it.
+our $MATCHED;
+
 
 sub new {
   my $class = shift;
@@ -308,12 +313,10 @@ sub _compile {
   my @routes = @{ $self->{routes} };
   @routes or return qr/(?!)/; # pattern can never match
 
-  my $match = $self->{match};
-
   # Tested faster to terminate each route with \z rather than placing
   # at end of combined regex.
   my $regex = join '|',
-    map { "(?: $_->{regex} \\z (?{ \$\$match = $_->{index} }))" }
+    map { "(?: $_->{regex} \\z (?{ \$Router::Right::MATCHED = $_->{index} }))" }
     map { $_->[0] } # unique route paths
     @routes
   ;
@@ -338,9 +341,10 @@ sub match {
   $$match = undef;
   $self->{error} = undef;
 
+  local $MATCHED;
   $path =~ /$regex/ or return $self->error(NOT_FOUND);
 
-  # The regex above set the index of the matching route group on success
+  $$match = $MATCHED // croak 'route matched, but no group index was set';
   my $routes = $self->{routes}[ $$match ]
     or croak "no route defined for match index '$$match'?!";
 
