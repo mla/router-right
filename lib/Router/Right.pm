@@ -1287,6 +1287,39 @@ A route is refused when an earlier route with the same path already takes
 all of its methods and has a different payload, since it could never
 match. With the same payload it is accepted, as a second name for url().
 
+=head1 PERFORMANCE
+
+A route path with no placeholder is found with one hash lookup. The others
+are kept in a tree keyed by the whole literal segments they start with
+(C</admin/users/{id}> under C<admin>, then C<users>). A request walks the
+tree a segment at a time and is tried only against the routes in the node
+it reaches and the nodes above it, as one regex. A match costs about the
+same with a hundred routes or a hundred thousand. Routes that start with a
+placeholder, such as a catch-all C</{path:.*}>, sit at the root and are
+tried for every request, so keep them few.
+
+The matchers are compiled on the first match for each request method. A
+server that forks its workers can call match() once per method before the
+fork, so the workers share them.
+
+=head2 Placeholders that can split the same text
+
+A regex tries every way of dividing a path between placeholders before it
+gives up. When two or more placeholders in one segment can each take the
+text between them, a request that nearly matches costs time in proportion
+to its length raised to the number of such placeholders. These routes
+take seconds for one crafted request of a few thousand characters:
+
+  /a/{x}{y}{z}         # three ways to split any run of text
+  /a/{x}-{y}-{z}       # each may hold a '-' as well
+  /a/{x:.+}/{y:.+}/{z:.+}/end
+
+Give each placeholder a pattern that cannot take its neighbour's text
+(C</a/{x:[^/-]+}-{y:[^/-]+}>), or one segment of its own. These are safe:
+one default placeholder per segment, C<{id}{.format}>, and a final
+C<{rest:.*}>, which accepts whatever is left. Nested quantifiers inside a
+pattern of your own, such as C<{x:(?:a+)+}>, are a hazard in any regex.
+
 =head1 SEE ALSO
 
 Router::Right is based on Tokuhiro Matsuno's Router::Simple and Router::Boom modules.
