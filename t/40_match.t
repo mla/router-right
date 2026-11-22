@@ -181,6 +181,116 @@ describe 'Router' => sub {
       is $r->url('code', code => 123), '/c/123';
     };
 
+    it 'reads a numbered back-reference as one to its own group' => sub {
+      $r->add(other => '/o/{x}', 'Other');
+      $r->add(twice => '/t/{w}/{x:([a-c])\1}/{y:(d)\g1}', 'Twice');
+
+      is_deeply $r->match('/t/q/bb/dd'),
+        { controller => 'Twice', w => 'q', x => 'bb', y => 'dd' };
+      ok !$r->match('/t/q/bc/dd');
+      ok !$r->match('/t/q/bb/de');
+      is $r->url('twice', w => 'q', x => 'cc', y => 'dd'), '/t/q/cc/dd';
+    };
+
+    it 'reads numbered recursion and conditions as its own' => sub {
+      $r->add(nest => '/n/{x:(\((?:[^()]|(?1))*\))}', 'Nest');
+      $r->add(cond => '/c/{x:(a)?(?(1)b|c)}', 'Cond');
+      $r->add(named => '/q/{x:(?<q>[a-c])\1}', 'Named');
+
+      is $r->match('/n/(a(b))')->{x}, '(a(b))';
+      ok !$r->match('/n/(a(b)');
+      ok $r->match('/c/ab');
+      ok $r->match('/c/c');
+      ok !$r->match('/c/b');
+      is_deeply $r->match('/q/cc'), { controller => 'Named', x => 'cc', q => 'c' };
+    };
+
+    it 'reads its own groups by number in a node too large to capture' => sub {
+      no warnings 'once';
+      local $Router::Right::CAPTURE_LIMIT = 1;
+      $r->add("f$_" => "/{x:([a-c])\\1}/f$_", "F$_") foreach 1 .. 3;
+
+      is_deeply $r->match('/bb/f2'), { controller => 'F2', x => 'bb' };
+      ok !$r->match('/bc/f2');
+    };
+
+    it 'reads a number inside a branch reset as the group of that number' => sub {
+      $r->add(reset => '/r/{x:(?|(a)|(b))\1}', 'Reset');
+
+      ok $r->match('/r/aa');
+      ok $r->match('/r/bb');
+      ok !$r->match('/r/ab');
+    };
+
+    it 'recurses into its own group of a name another route uses too' => sub {
+      $r->add(other => '/{y:(?<q>z)(?&q)}/o', 'Other');
+      $r->add(nest => '/{x:(?<q>\((?:[^()]|(?&q))*\))}/n', 'Nest');
+
+      is_deeply $r->match('/(a(b))/n'),
+        { controller => 'Nest', x => '(a(b))', q => '(a(b))' };
+      ok !$r->match('/(a(b)/n');
+      ok $r->match('/zz/o');
+    };
+
+    it 'refers by name to its own group when another placeholder has the name' => sub {
+      $r->add(two => '/t/{a:(?<w>[a-c])}/{b:(?<w>[a-c])\k<w>}', 'Two');
+
+      ok $r->match('/t/a/bb');
+      ok !$r->match('/t/a/ba');
+    };
+
+    it 'recurses into the whole of its own pattern with (?R)' => sub {
+      $r->add(parens => '/p/{x:\((?:[^()]|(?R))*\)}', 'Parens');
+
+      is $r->match('/p/(a(b)c)')->{x}, '(a(b)c)';
+      ok !$r->match('/p/(a(b)c');
+      is $r->url('parens', x => '(a(b))'), '/p/(a(b))';
+    };
+
+    it 'reuses a pattern defined in a DEFINE block' => sub {
+      $r->add(range => '/report/{range:(?&d)--(?&d)(?(DEFINE)(?<d>\d{4}-\d\d-\d\d))}', 'Range');
+
+      is $r->match('/report/2026-01-01--2026-03-31')->{range},
+        '2026-01-01--2026-03-31';
+      ok !$r->match('/report/2026-01-01--soon');
+    };
+
+    it 'counts no group for (DEFINE) in its numbered references' => sub {
+      $r->add(def => '/d/{x:(?(DEFINE)(?<d>[a-c]))([a-c])\2}', 'Def');
+
+      ok $r->match('/d/aa');
+      ok !$r->match('/d/ab');
+    };
+
+    it 'asks about recursion into its own group' => sub {
+      $r->add(num => '/n/{x:(\((?:[^()]|(?1))*\)(?(R1)|!))}', 'Num');
+      $r->add(name => '/q/{x:(?<q>\((?:[^()]|(?&q))*\)(?(R&q)|!))}', 'Name');
+
+      ok $r->match('/n/(a(b))!');
+      ok !$r->match('/n/(a(b))');
+      ok $r->match('/q/(a(b))!');
+      ok !$r->match('/q/(a(b))');
+    };
+
+    it 'keeps relative references and forward back-references its own' => sub {
+      $r->add(rel => '/r/{x:([a-c])([a-c])\g{-2}\g{-1}}', 'Rel');
+      $r->add(fwd => '/f/{x:(?:\2x|(a)(a))+}', 'Fwd');
+
+      ok $r->match('/r/abab');
+      ok !$r->match('/r/abba');
+      is_deeply [ map { !!$r->match($_) } '/f/aaax', '/f/aa', '/f/aax' ],
+        [ !!('aaax' =~ /\A(?:(?:\2x|(a)(a))+)\z/), !!('aa' =~ /\A(?:(?:\2x|(a)(a))+)\z/),
+          !!('aax' =~ /\A(?:(?:\2x|(a)(a))+)\z/) ];
+    };
+
+    it 'takes a space or # in a pattern literally' => sub {
+      $r->add(space => '/s/{x:b c}', 'Space');
+      $r->add(hash => '/h/{x:[a-c]#}', 'Hash');
+
+      is $r->match('/s/b c')->{x}, 'b c';
+      is $r->match('/h/b#')->{x}, 'b#';
+    };
+
     it 'accepts alternation in a pattern' => sub {
       $r->add(kind => '/k/{kind:booking|posting}/{id}', 'Kind');
 
