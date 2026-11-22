@@ -33,15 +33,13 @@ sub new {
 
   $class = ref($class) || $class;
 
-  my $match;
-
   # Every scope made by with() shares this table; what differs between them
   # is the prefix below.
   my %table = (
     routes      => [],      # routes in insertion order, grouped by path
     route_index => {},      # path => route index of group in above routes[]
     name_index  => {},      # route name => route
-    match       => \$match, # route group index of last match
+    match       => undef,   # route group index of last match
     error       => undef,   # status code of last match
     compiled    => {},      # per method: regex and literal paths; see _compile
     methods     => {},      # every method some route names
@@ -279,30 +277,26 @@ sub _build_route {
 }
 
 
-# A route name or path under this scope's prefix. A route with no name stays
-# unnamed whatever the scope is called.
-# Args laid over this scope's. Methods given here replace the scope's
+# What a route or scope declared under this one is called, where it lives
+# and its args laid over this scope's. Methods it names replace the scope's
 # rather than adding to them, so a route can narrow what its scope allows.
-sub _scoped_args {
+# A route with no name stays unnamed whatever the scope is called.
+sub _declare {
   my $self = shift;
-  my %args = @_;
+  my $name = shift;
+  my $path = shift;
 
-  my %scope = %{ $self->{args} };
-  delete $scope{methods} if @{ $args{methods} || [] };
-
-  return $self->_args(%scope, %args);
-}
-
-
-sub _qualify {
-  my $self = shift;
-  my ($name, $path) = @_;
+  (my $methods, $path) = $self->_split_route_path($path);
 
   $name = join '_', grep { defined && length } $self->{name}, $name
     if defined $name;
   $path = join '', grep { defined } $self->{path}, $path;
 
-  return ($name, $path);
+  my %args  = $self->_args(@_, methods => $methods);
+  my %scope = %{ $self->{args} };
+  delete $scope{methods} if @{ $args{methods} };
+
+  return ($name, $path, $self->_args(%scope, %args));
 }
 
 
@@ -311,11 +305,8 @@ sub add {
   my $name = shift;
   my $path = shift // croak 'no route path supplied';
 
-  (my $methods, $path) = $self->_split_route_path($path);
-  ($name, $path) = $self->_qualify($name, $path);
+  ($name, $path, my %args) = $self->_declare($name, $path, @_);
   length $path or croak 'no route path supplied';
-
-  my %args = $self->_scoped_args($self->_args(@_, methods => $methods));
 
   my $table = $self->{table};
 
@@ -378,10 +369,13 @@ sub _compile {
   my $method = shift // '';
 
   my $table = $self->{table};
-  my @groups =
-    map  { $_->[0] }
-    grep { $self->_route_for_method($_, $method) }
-    @{ $table->{routes} };
+
+  my @takes; # group index => its route for the method
+  foreach my $routes (@{ $table->{routes} }) {
+    my $route = $self->_route_for_method($routes, $method) or next;
+    $takes[ $route->{index} ] = $route;
+  }
+  my @groups = map { $table->{routes}[ $_->{index} ][0] } grep { $_ } @takes;
 
   # Tested faster to terminate each route with \z rather than placing
   # at end of combined regex.
@@ -403,7 +397,20 @@ sub _compile {
     $static{ $_->{path} } = $_->{index};
   }
 
-  return $table->{compiled}{ $method } = [ $regex, \%static ];
+  return $table->{compiled}{ $method } = [ $regex, \%static, \@takes ];
+}
+
+
+# The compiled matcher for a request method, which is upper case or ''.
+# Methods no route names share one, so a request cannot make more of them.
+sub _matcher {
+  my $self   = shift;
+  my $method = shift;
+
+  my $table = $self->{table};
+  my $key = !length $method || $table->{methods}{ $method } ? $method : '*';
+
+  return $table->{compiled}{ $key } || $self->_compile($key);
 }
 
 
@@ -433,8 +440,7 @@ sub _path_exists {
   my $self = shift;
   my $path = shift;
 
-  my ($regex, $static) =
-    @{ $self->{table}{compiled}{''} || $self->_compile('') };
+  my ($regex, $static) = @{ $self->_matcher('') };
 
   return exists $static->{ $path } || $path =~ $regex;
 }
@@ -458,9 +464,7 @@ sub match {
   my $method = shift;
 
   my $table = $self->{table};
-  my $match = $table->{match};
-  $$match = undef;
-  $table->{error} = $table->{refused} = undef;
+  $table->{match} = $table->{error} = $table->{refused} = undef;
 
   $method = defined $method && length $method ? uc $method : '';
 
@@ -468,18 +472,14 @@ sub match {
   # route. Under legacy_methods, the matcher of every path: its first match
   # owns the request, and is a 405 when none of its routes takes the method.
   my $legacy = $table->{legacy_methods};
-  my $key = $legacy || !length $method ? ''
-    : $table->{methods}{ $method } ? $method : '*';
-
-  my ($regex, $static) =
-    @{ $table->{compiled}{ $key } || $self->_compile($key) };
+  my ($regex, $static, $takes) = @{ $self->_matcher($legacy ? '' : $method) };
 
   my %captured;
   my $index = $static->{ $path };
   if (!defined $index) {
     local $MATCHED;
     if ($path !~ $regex) {
-      length $key && $self->_path_exists($path)
+      !$legacy && length $method && $self->_path_exists($path)
         or return $self->error(NOT_FOUND);
 
       $table->{refused} = $path;
@@ -487,17 +487,19 @@ sub match {
     }
     $index = $MATCHED // croak 'route matched, but no group index was set';
 
-    # Read by name: copying %+ walks every name in the combined regex.
+    # Read here, while %+ is this match's, and by name: copying %+ walks
+    # every name in the combined regex.
     foreach (@{ $table->{routes}[ $index ][0]{captures} }) {
       my $value = $+{ $_ };
       $captured{ $_ } = $value if defined $value;
     }
   }
 
-  $$match = $index;
-  my $matched_route = $self->_route_for_method(
-    $table->{routes}[ $index ], $legacy ? $method : $key,
-  ) or return $self->error(METHOD_NOT_ALLOWED);
+  $table->{match} = $index;
+  my $matched_route = $legacy
+    ? $self->_route_for_method($table->{routes}[ $index ], $method)
+    : $takes->[ $index ];
+  $matched_route or return $self->error(METHOD_NOT_ALLOWED);
 
   my $payload = { %{ $matched_route->{payload} }, %captured };
   my $match_class = $self->_match_class;
@@ -535,32 +537,23 @@ sub url {
   my $name = shift;
   defined $name && length $name or croak 'no url name supplied';
 
-  # A param passed twice keeps its first place and its last value.
-  my (%args, @order);
-  for (my $i = 0; $i < @_; $i += 2) {
-    push @order, $_[ $i ] unless exists $args{ $_[ $i ] };
-    $args{ $_[ $i ] } = $_[ $i + 1 ];
-  }
+  my %args = (@_, @_ % 2 ? undef : ());
 
-  my @route;
-  if (my $route = $self->{table}{name_index}{ $name }) {
-    @route = @{ $route->{route} };    
+  my $route;
+  if (my $named = $self->{table}{name_index}{ $name }) {
+    $route = $named->{route};
   } elsif ($name =~ m{^/}) { # url, not a route name
-    if ($name =~ /{/) { # has placeholders? if so, need to parse it
-      my ($route, $regex) = $self->_build_route($name, {});
-      @route = @$route;
-    } else {
-      @route = ($name); # otherwise, treat it as string literal
-    }
+    # has placeholders? if so, parse it; otherwise it is a string literal
+    $route = $name =~ /{/ ? ($self->_build_route($name, {}))[0] : [ $name ];
   } else {
     croak "url name '$name' not found";
   }
 
   my $is_placeholder = 0;
-  my @path;
-  foreach (@route) {
+  my $path = '';
+  foreach (@$route) {
     if (!$is_placeholder) {
-      push @path, $_;
+      $path .= $_;
       next;
     }
 
@@ -577,17 +570,24 @@ sub url {
     $pval =~ $_->{check}
       or croak "invalid value for param '$pname' in url '$name': '$pval'";
 
-    $pval = $self->_escape_path($pval);
-    $pval = ".$pval" if $_->{type} eq '.';
-
-    push @path, $pval;
+    $path .= '.' if $_->{type} eq '.';
+    $path .= $self->_escape_path($pval);
   } continue {
     $is_placeholder = !$is_placeholder;
   }
 
-  my $uri = URI->new(join '', @path);
-  my @query = map { $_ => $args{ $_ } } grep { exists $args{ $_ } } @order;
-  $uri->query_form(\@query) if @query;
+  my $uri = URI->new($path);
+
+  # What is left is the query: each param in the place it was first
+  # passed, with the value it was last passed.
+  if (%args) {
+    my %seen;
+    $uri->query_form([
+      map  { $_ => $args{ $_ } }
+      grep { exists $args{ $_ } && !$seen{ $_ }++ }
+      @_[ grep { !($_ % 2) } 0 .. $#_ ]
+    ]);
+  }
 
   return $uri;
 }
@@ -605,20 +605,15 @@ sub with {
   my $self = shift;
   my $name = shift;
   my $path = shift;
-  my %args = $self->_args(@_);
 
+  ($name, $path, my %args) = $self->_declare($name // '', $path, @_);
   my $call = delete $args{call};
-
-  (my $methods, $path) = $self->_split_route_path($path);
-  ($name, $path) = $self->_qualify($name // '', $path);
 
   my $scope = bless {
     table => $self->{table},
     name  => $name,
     path  => $path,
-    args  => scalar $self->_scoped_args(
-      $self->_args(%args, methods => $methods)
-    ),
+    args  => \%args,
   }, ref $self;
 
   if ($call) {
@@ -650,7 +645,7 @@ sub allowed_methods {
   } else {
     @indexes = defined $table->{refused}
       ? $self->_groups_matching($table->{refused})
-      : (${ $table->{match} });
+      : ($table->{match});
   }
   defined $indexes[0] or return;
 
@@ -658,8 +653,7 @@ sub allowed_methods {
     @{ $table->{routes}[ $_ ] or croak "no routes found for index '$_'?!" }
   } @indexes;
 
-  my $allowed = $self->_methods(map { $_->{methods} } @routes);
-  return wantarray ? @$allowed : $allowed;
+  return $self->_methods(map { $_->{methods} } @routes);
 }
 
 
@@ -735,10 +729,13 @@ sub _resource_table {
 }
 
 
-# 'POST {op}-hold' => [ 'hold', 'POST', '/{op}-hold' ]; GET when no method
-# is given, so a route cannot change something on a GET by omission.
+# A member or collection route as a row of the resource table:
+# 'POST {op}-hold' => [ 'hold', '%m_hold', 'POST', '/{op}-hold' ]. GET when
+# no method is given, so a route cannot change something on a GET by
+# omission.
 sub _resource_extra {
   my $self = shift;
+  my $on   = shift;
   my $spec = shift // '';
 
   my ($methods, $path) = $spec =~ m{\A\s* (?:(\S+)\s+)? /?(\S+) \s*\z}x
@@ -749,7 +746,7 @@ sub _resource_extra {
   $action =~ s/^_+|_+$//g;
   length $action or croak "no action name in resource route '$spec'";
 
-  return [ $action, $methods // 'GET', "/$path" ];
+  return [ $action, "%${on}_$action", $methods // 'GET', "/$path" ];
 }
 
 
@@ -786,56 +783,48 @@ sub resource {
   my $only   = delete $args{only};
   my $except = delete $args{except};
   !($only && $except) or croak "resource takes 'only' or 'except', not both";
+  my $unknown = sub {
+    $known{ $_ } or croak "unknown resource action '$_'" foreach sort @_;
+  };
+
   my %listed = map { $_ => 1 } grep { defined }
     $self->_list($only // $except);
-  foreach (sort keys %listed) {
-    $known{ $_ } or croak "unknown resource action '$_'";
-  }
+  $unknown->(keys %listed);
   @table = grep { $only ? $listed{ $_->[0] } : !$listed{ $_->[0] } } @table
     if $only || $except;
 
-  my $actions = delete $args{actions} || {};
-  my @collection = map { $self->_resource_extra($_) }
-    grep { defined } $self->_list($extra_collection);
-  my @member = map { $self->_resource_extra($_) }
-    grep { defined } $self->_list(delete $args{member});
-  $known{ $_->[0] } = 1 foreach @collection, @member;
-  foreach (sort keys %$actions) {
-    $known{ $_ } or croak "unknown resource action '$_'";
+  foreach (@table) {
+    $_ = [ @$_ ];
+    $_->[3] =~ s/\{id\}/$id/;
+    $_->[3] =~ s/\{\.format\}/$format/;
   }
 
-  my $add = sub {
-    my ($scope, $action, $name, $route) = @_;
+  # Collection routes go first, or /{id} would take their paths.
+  my @routes = (
+    map({ $self->_resource_extra(c => $_) }
+      grep { defined } $self->_list($extra_collection)),
+    @table,
+    map({ $_->[3] = "/$id$_->[3]"; $_ }
+      map  { $self->_resource_extra(m => $_) }
+      grep { defined } $self->_list(delete $args{member})),
+  );
 
-    $scope->add(
-      $name => $route,
-      payload => { action => $action },
-      exists $actions->{ $action } ? (payload => $actions->{ $action }) : (),
-    );
-  };
+  my $actions = delete $args{actions} || {};
+  $known{ $_->[0] } = 1 foreach @routes;
+  $unknown->(keys %$actions);
 
   $self->with(delete $args{name}, delete $args{path}, %args, call => sub {
     my $scope = shift;
 
-    # Before the table, or /{id} would take a collection route's path.
-    foreach (@collection) {
-      my ($action, $methods, $path) = @$_;
-      $add->($scope, $action, "$name{c}_$action",
-        "$methods /$plural$path");
-    }
-
-    foreach (@table) {
+    foreach (@routes) {
       my ($action, $name, $methods, $path) = @$_;
-      $name =~ s/%([mc])/$name{ $1 }/g if defined $name;
-      $path =~ s/\{id\}/$id/;
-      $path =~ s/\{\.format\}/$format/;
-      $add->($scope, $action, $name, "$methods /$plural$path");
-    }
+      $name =~ s/%([mc])/$name{ $1 }/ if defined $name;
 
-    foreach (@member) {
-      my ($action, $methods, $path) = @$_;
-      $add->($scope, $action, "$name{m}_$action",
-        "$methods /$plural/$id$path");
+      $scope->add(
+        $name => "$methods /$plural$path",
+        payload => { action => $action },
+        exists $actions->{ $action } ? (payload => $actions->{ $action }) : (),
+      );
     }
   });
 
