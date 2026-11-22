@@ -297,33 +297,33 @@ describe 'Router' => sub {
         is_deeply [ $r->allowed_methods('/foo') ], [qw/ GET PUT /];
       };
 
-    it 'give a path to a later route when the first refuses the method' =>
-      sub {
-        $r->add(show    => 'GET /x/{id}', 'X#show');
-        $r->add(special => 'POST /x/special', 'X#special');
-        $r->add(update  => 'PUT /x/{id:\d+}', 'X#update');
+    it 'refuse a method the first matching path does not take, though ' .
+       'a later path takes it' => sub {
+      $r->add(remove => 'POST /x/{id}/delete', 'X#delete');
+      $r->add(any    => '/x/{id}/{action}', 'X');
 
-        is $r->match('/x/special', 'POST')->{action}, 'special';
-        is $r->match('/x/special', 'GET')->{action}, 'show';
-        is_deeply $r->match('/x/7', 'PUT'),
-          { controller => 'X', action => 'update', id => 7 };
-        is $r->match('/x/7', 'PUT')->name, 'update';
-        ok !$r->error;
+      is $r->match('/x/7/delete', 'POST')->name, 'remove';
+      ok !$r->match('/x/7/delete', 'GET');
+      is $r->error, 405;
+      is_deeply [ $r->allowed_methods ], ['POST'];
+      is $r->match('/x/7/other', 'GET')->{action}, 'other';
+    };
+
+    it 'refuse a method for a literal path a later pattern would take' =>
+      sub {
+        $r->add(lit => 'POST /x/special', 'X#special');
+        $r->add(any => '/x/{id}', 'X#show');
+
+        ok !$r->match('/x/special', 'GET');
+        is $r->error, 405;
       };
 
-    it 'report every method the path takes when none of them fits' => sub {
-      $r->add(show    => 'GET /x/{id}', 'X#show');
-      $r->add(special => 'POST /x/special', 'X#special');
-      $r->add(update  => 'PUT /x/{id:\d+}', 'X#update');
+    it 'treat a path written two ways as two paths' => sub {
+      $r->add(show   => 'GET /x/{id}', 'X#show');
+      $r->add(update => 'PUT /x/{id:\d+}', 'X#update');
 
-      ok !$r->match('/x/special', 'DELETE');
+      ok !$r->match('/x/7', 'PUT');
       is $r->error, 405;
-      is_deeply [ $r->allowed_methods ], [qw/ GET POST /];
-
-      ok !$r->match('/x/7', 'DELETE');
-      is_deeply [ $r->allowed_methods ], [qw/ GET PUT /];
-
-      ok $r->match('/x/7', 'GET');
       is_deeply [ $r->allowed_methods ], ['GET'];
     };
 
