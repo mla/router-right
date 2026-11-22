@@ -50,6 +50,15 @@ describe 'Router url' => sub {
     is $r->url('user', id => 7, tag => [qw/ a b /]), '/users/7?tag=a&tag=b';
   };
 
+  it 'leaves the values it is passed as they were' => sub {
+    my @tags = ('a b', '100%', 'x&y');
+    $r->url('user', id => 7, tag => \@tags) for 1 .. 2;
+
+    is_deeply \@tags, [ 'a b', '100%', 'x&y' ];
+    is $r->url('user', id => 7, tag => \@tags),
+      '/users/7?tag=a+b&tag=100%25&tag=x%26y';
+  };
+
   it 'keeps the last value of a query param passed twice' => sub {
     is $r->url('user', id => 7, q => 'a', q => 'b'), '/users/7?q=b';
   };

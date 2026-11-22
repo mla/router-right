@@ -27,7 +27,18 @@
 
   - match() looks a path with no placeholder up in a hash rather than the
     regex, and reads only the matched route's captures. url() builds its
-    query in one pass. Tie::IxHash is no longer needed.
+    query string itself and parses the URL once, skips escaping a value
+    that needs none, and checks a placeholder with the default pattern
+    without a regex. Methods that take the same paths, as GET and HEAD
+    usually do, share one compiled regex. Tie::IxHash is no longer
+    needed.
+
+  - URI::QueryParam is no longer loaded. Code that calls query_param()
+    on a URI must load it itself.
+
+  - A placeholder in a route's parsed path ({route} of routes() and
+    Match->route) holds pname, check and format; optional, type and
+    regex are gone.
 
   - resource() builds seven routes, not eleven. The formatted_ twins are
     gone (the {.format} routes beside them always matched first), update

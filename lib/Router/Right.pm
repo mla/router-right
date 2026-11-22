@@ -10,7 +10,6 @@ use Lingua::EN::Inflect qw/ PL_N /;
 use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
 use URI;
-use URI::QueryParam;
 
 our $VERSION = '2.00';
 
@@ -42,6 +41,7 @@ sub new {
     match       => undef,   # route group index of last match
     error       => undef,   # status code of last match
     compiled    => {},      # per method: regex and literal paths; see _compile
+    shared      => {},      # regex and literal paths by the groups they cover
     methods     => {},      # every method some route names
     refused     => undef,   # path of the last match refused for its method
     legacy_methods => $args{legacy_methods} // $args{legacy},
@@ -58,10 +58,11 @@ sub new {
 }
 
 
+# The values given, with array refs flattened and undefs dropped.
 sub _list {
   my $class = shift;
 
-  return map { ref $_ eq 'ARRAY' ? @$_ : $_ } @_;
+  return grep { defined } map { ref $_ eq 'ARRAY' ? @$_ : $_ } @_;
 }
 
 
@@ -104,8 +105,7 @@ sub _parse_payload {
 
   !ref $payload or croak "unexpected payload '$payload'";
 
-  my ($controller, $action) =
-    $payload =~ /#/ ? split(/#/, $payload, 2) : ($payload, undef);
+  my ($controller, $action) = split /#/, $payload, 2;
 
   return {
     $controller ? (controller => $controller) : (),
@@ -143,16 +143,13 @@ sub _args {
       my $payload = $self->_parse_payload(shift @args);
       $merged{ $key } = $self->_merge_payload($merged{ $key }, $payload);
     } elsif ($key eq 'methods') {
-      $merged{ $key } = [
-        grep { defined }
-        $self->_list($merged{ $key }, shift @args)
-      ];
+      $merged{ $key } = [ $self->_list($merged{ $key }, shift @args) ];
     } else {
       $merged{ $key } = shift @args;
     }
   }
 
-  return wantarray ? %merged : \%merged;
+  return %merged;
 }
 
 
@@ -176,7 +173,6 @@ sub _methods {
     uniq 
     map  { s/^\s+|\s+$//g; uc $_ }
     map  { split '[|,]' }
-    grep { defined }
     $self->_list(@_)
   ;
   @methods = () if any { $_ eq '*' } @methods;
@@ -220,7 +216,6 @@ sub _split_placeholders {
 sub _build_route {
   my $class = shift;
   my $route = shift or croak 'no route supplied';
-  my $args  = shift or croak 'no args supplied';
 
   my @route = $class->_split_placeholders($route);
   my @regex;
@@ -234,38 +229,32 @@ sub _build_route {
       $pname =~ /\A(?:\.format|[A-Za-z_]\w*)\z/
         or croak "invalid placeholder name '$pname'";
 
-      my $optional = 0;
-      my $pre = '';  # match before placeholder content
-      # placeholder type; used to identify special ones like .format
-      my $type = ''; 
-      if ($pname eq '.format') {
-        $optional = 1;
+      # {.format} is optional, and written after a dot.
+      my $format = $pname eq '.format';
+      if ($format) {
         $pname = 'format';
         $regex = '[^.\s/]+?' unless length $regex;
-        $pre = '\\.';
-        $type = '.';
-      } else {
-        $regex = '[^/]+?' unless length $regex;
       }
 
       croak "placeholder '$pname' redefined" if $placeholders{ $pname }++;
 
-      my $check = eval { qr/\A(?:$regex)\z/ }
-        or croak "invalid pattern for placeholder '$pname': $@";
+      # url() tests the default pattern without a regex, which is slower.
+      my $check;
+      if (length $regex) {
+        $check = eval { qr/\A(?:$regex)\z/ }
+          or croak "invalid pattern for placeholder '$pname': $@";
+      } else {
+        $regex = '[^/]+?';
+      }
 
-      $_ = {
-        pname    => $pname,
-        regex    => $regex,
-        check    => $check,
-        optional => $optional,
-        type     => $type,
-      };
+      $_ = { pname => $pname, check => $check, format => $format };
 
       # A pattern may name captures of its own; match() returns those too.
       push @captures, $pname, $regex =~ /\(\?P?[<']([A-Za-z_]\w*)[>']/g;
 
-      my $opt = $optional ? '?' : '';
-      push @regex, "(?:$pre(?<$pname>$regex))$opt";
+      push @regex, $format
+        ? "(?:\\.(?<$pname>$regex))?"
+        : "(?<$pname>$regex)";
     } else {
       push @regex, quotemeta($_); # literal
     }
@@ -317,7 +306,7 @@ sub add {
 
   my @methods = $self->_methods($args{methods});
 
-  my ($route, $regex, $captures) = $self->_build_route($path, \%args);
+  my ($route, $regex, $captures) = $self->_build_route($path);
 
   my $index = $self->_group_index($path);
 
@@ -352,6 +341,7 @@ sub add {
   $table->{name_index}{ $name } = $_ if defined $name;
   $table->{methods}{ $_ } = 1 foreach @methods;
   $table->{compiled} = {};
+  $table->{shared} = {};
 
   return $self;
 }
@@ -370,34 +360,43 @@ sub _compile {
 
   my $table = $self->{table};
 
-  my @takes; # group index => its route for the method
-  foreach my $routes (@{ $table->{routes} }) {
-    my $route = $self->_route_for_method($routes, $method) or next;
-    $takes[ $route->{index} ] = $route;
-  }
-  my @groups = map { $table->{routes}[ $_->{index} ][0] } grep { $_ } @takes;
+  # Group index => its route for the method. Routes in a group share a
+  # path, so the one taken stands for the group.
+  my @takes =
+    map { scalar $self->_route_for_method($_, $method) }
+    @{ $table->{routes} };
+  my @groups = grep { $_ } @takes;
 
-  # Tested faster to terminate each route with \z rather than placing
-  # at end of combined regex.
-  my $regex = join '|',
-    map { "(?: $_->{regex} \\z (?{ \$Router::Right::MATCHED = $_->{index} }))" }
-    grep { @{ $_->{route} } > 1 }
-    @groups
-  ;
+  # Methods taken on the same paths, as GET and HEAD usually are, share a
+  # regex and literal index; only the route each takes differs.
+  my $paths = join ',', map { $_->{index} } @groups;
+  my $shared = $table->{shared}{ $paths } ||= do {
+    # Tested faster to terminate each route with \z rather than placing
+    # at end of combined regex.
+    my $regex = join '|',
+      map {
+        "(?: $_->{regex} \\z (?{ \$Router::Right::MATCHED = $_->{index} }))"
+      }
+      grep { @{ $_->{route} } > 1 }
+      @groups
+    ;
 
-  {
-    use re 'eval';
-    $regex = length $regex ? qr/\A (?: $regex )/x : qr/(?!)/;
-  }
+    {
+      use re 'eval';
+      $regex = length $regex ? qr/\A (?: $regex )/x : qr/(?!)/;
+    }
 
-  my %static;
-  foreach (grep { @{ $_->{route} } == 1 } @groups) {
-    local $MATCHED;
-    next if $_->{path} =~ $regex && $MATCHED < $_->{index};
-    $static{ $_->{path} } = $_->{index};
-  }
+    my %static;
+    foreach (grep { @{ $_->{route} } == 1 } @groups) {
+      local $MATCHED;
+      next if $_->{path} =~ $regex && $MATCHED < $_->{index};
+      $static{ $_->{path} } = $_->{index};
+    }
 
-  return $table->{compiled}{ $method } = [ $regex, \%static, \@takes ];
+    [ $regex, \%static ];
+  };
+
+  return $table->{compiled}{ $method } = [ @$shared, \@takes ];
 }
 
 
@@ -466,13 +465,15 @@ sub match {
   my $table = $self->{table};
   $table->{match} = $table->{error} = $table->{refused} = undef;
 
-  $method = defined $method && length $method ? uc $method : '';
+  $method = uc($method // '');
 
   # The matcher of the routes taking this method: its first match is the
   # route. Under legacy_methods, the matcher of every path: its first match
   # owns the request, and is a 405 when none of its routes takes the method.
   my $legacy = $table->{legacy_methods};
-  my ($regex, $static, $takes) = @{ $self->_matcher($legacy ? '' : $method) };
+  my $key = $legacy ? '' : $method;
+  my ($regex, $static, $takes) =
+    @{ $table->{compiled}{ $key } || $self->_matcher($key) };
 
   my %captured;
   my $index = $static->{ $path };
@@ -521,12 +522,15 @@ sub match {
 my $PATH_UNSAFE = qr{([^A-Za-z0-9\-._~!\$&'()*+,;=:\@/])};
 
 
+my %ESCAPE = map { chr($_) => sprintf '%%%02X', $_ } 0 .. 255;
+
+
 sub _escape_path {
   my $class = shift;
   my $value = shift;
 
   utf8::encode($value);
-  $value =~ s/$PATH_UNSAFE/sprintf '%%%02X', ord $1/ge;
+  $value =~ s/$PATH_UNSAFE/$ESCAPE{ $1 }/g;
 
   return $value;
 }
@@ -544,15 +548,14 @@ sub url {
     $route = $named->{route};
   } elsif ($name =~ m{^/}) { # url, not a route name
     # has placeholders? if so, parse it; otherwise it is a string literal
-    $route = $name =~ /{/ ? ($self->_build_route($name, {}))[0] : [ $name ];
+    $route = $name =~ /{/ ? ($self->_build_route($name))[0] : [ $name ];
   } else {
     croak "url name '$name' not found";
   }
 
-  my $is_placeholder = 0;
   my $path = '';
   foreach (@$route) {
-    if (!$is_placeholder) {
+    if (!ref) {
       $path .= $_;
       next;
     }
@@ -560,36 +563,63 @@ sub url {
     my $pname = $_->{pname};
 
     my $supplied = exists $args{ $pname };
-    $supplied || $_->{optional}
+    $supplied || $_->{format}
       or croak "required param '$pname' missing from url '$name'";
 
     my $pval = delete $args{ $pname } // '';
     $pval = $self->_resolve_param($pname, $pval) // '' if $supplied;
-    next if $_->{optional} && !length $pval;
+    next if $_->{format} && !length $pval;
 
-    $pval =~ $_->{check}
+    ($_->{check} ? $pval =~ $_->{check} : length $pval && $pval !~ tr{/}{})
       or croak "invalid value for param '$pname' in url '$name': '$pval'";
 
-    $path .= '.' if $_->{type} eq '.';
-    $path .= $self->_escape_path($pval);
-  } continue {
-    $is_placeholder = !$is_placeholder;
+    $path .= '.' if $_->{format};
+    $path .= $pval =~ tr{-A-Za-z0-9._~!$&'()*+,;=:@/}{}c
+      ? $self->_escape_path($pval)
+      : $pval;
   }
 
-  my $uri = URI->new($path);
+  %args or return URI->new($path);
 
   # What is left is the query: each param in the place it was first
   # passed, with the value it was last passed.
-  if (%args) {
-    my %seen;
-    $uri->query_form([
-      map  { $_ => $args{ $_ } }
-      grep { exists $args{ $_ } && !$seen{ $_ }++ }
-      @_[ grep { !($_ % 2) } 0 .. $#_ ]
-    ]);
+  my @query;
+  for (my $i = 0; $i < @_; $i += 2) {
+    my $key = $_[ $i ];
+    push @query, $key => delete $args{ $key } if exists $args{ $key };
   }
 
-  return $uri;
+  # Written as query_form() writes it, so that URI parses the URL once.
+  # Left to URI: a path holding its own query or fragment, one ending in
+  # whitespace (URI->new trims it), and an undefined value, which URI
+  # writes as a bare key in some releases and as 'key=' in others.
+  my $simple = $path !~ /[?#]|\s\z/;
+  my @pairs;
+  for (my $i = 0; $simple && $i < @query; $i += 2) {
+    my ($key, $vals) = @query[ $i, $i + 1 ];
+    $key = '' unless defined $key;
+    $key =~ s{([;/?:\@&=+,\$\[\]%])}{$ESCAPE{ $1 }}g;
+    $key =~ tr/ /+/;
+    foreach (ref $vals eq 'ARRAY' ? @$vals : $vals) {
+      defined or $simple = 0, last;
+      my $val = "$_";
+      $val =~ s{([;/?:\@&=+,\$\[\]%])}{$ESCAPE{ $1 }}g;
+      $val =~ tr/ /+/;
+      push @pairs, "$key=$val";
+    }
+  }
+
+  if (!$simple) {
+    my $uri = URI->new($path);
+    $uri->query_form(\@query);
+    return $uri;
+  }
+  @pairs or return URI->new($path);
+
+  my $query = join $URI::DEFAULT_QUERY_FORM_DELIMITER || '&', @pairs;
+  $query =~ s/([^$URI::uric])/URI::Escape::escape_char($1)/ego;
+
+  return URI->new("$path?$query");
 }
 
 
@@ -787,8 +817,7 @@ sub resource {
     $known{ $_ } or croak "unknown resource action '$_'" foreach sort @_;
   };
 
-  my %listed = map { $_ => 1 } grep { defined }
-    $self->_list($only // $except);
+  my %listed = map { $_ => 1 } $self->_list($only // $except);
   $unknown->(keys %listed);
   @table = grep { $only ? $listed{ $_->[0] } : !$listed{ $_->[0] } } @table
     if $only || $except;
@@ -802,11 +831,11 @@ sub resource {
   # Collection routes go first, or /{id} would take their paths.
   my @routes = (
     map({ $self->_resource_extra(c => $_) }
-      grep { defined } $self->_list($extra_collection)),
+      $self->_list($extra_collection)),
     @table,
     map({ $_->[3] = "/$id$_->[3]"; $_ }
       map  { $self->_resource_extra(m => $_) }
-      grep { defined } $self->_list(delete $args{member})),
+      $self->_list(delete $args{member})),
   );
 
   my $actions = delete $args{actions} || {};
