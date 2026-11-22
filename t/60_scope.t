@@ -262,6 +262,43 @@ describe 'Router' => sub {
     };
   };
 
+  describe 'methods' => sub {
+    it 'come from the scope when the route names none' => sub {
+      $r->with(a => 'POST /a', 'A')->add(b => '/b');
+
+      is_deeply [ $r->allowed_methods('a_b') ], ['POST'];
+    };
+
+    it 'come from the route when it names its own' => sub {
+      $r->with(a => 'POST /a', 'A')->add(b => 'GET /b');
+
+      is_deeply [ $r->allowed_methods('a_b') ], ['GET'];
+    };
+
+    it 'come from the inner scope when it names its own' => sub {
+      $r->with(a => 'POST /a', 'A')
+        ->with(b => 'GET|PUT /b')
+        ->add(c => '/c')
+        ->add(d => '/d', methods => 'DELETE');
+
+      is_deeply [ $r->allowed_methods('a_b_c') ], [qw/ GET PUT /];
+      is_deeply [ $r->allowed_methods('a_b_d') ], ['DELETE'];
+    };
+
+    it 'join when a route gives them in its path and its options' => sub {
+      $r->add(b => 'GET /b', 'B', methods => 'POST');
+
+      is_deeply [ $r->allowed_methods('b') ], [qw/ GET POST /];
+    };
+
+    it 'leave a resource its own under a scope with methods' => sub {
+      $r->with(a => 'POST /a', 'A')->resource('note', '::Note');
+
+      is $r->match('/a/notes/7', 'GET')->{action}, 'show';
+      ok !$r->match('/a/notes/7', 'POST');
+    };
+  };
+
   describe 'resource' => sub {
     before each => sub {
       $r->resource('message', 'Message');

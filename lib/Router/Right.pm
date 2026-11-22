@@ -43,8 +43,9 @@ sub new {
     name_index  => {},      # route name => route
     match       => \$match, # route group index of last match
     error       => undef,   # status code of last match
-    regex       => undef,   # compiled on first match, dropped by add()
-    static      => undef,   # literal path => group index; built with regex
+    compiled    => {},      # per method: regex and literal paths; see _compile
+    methods     => {},      # every method some route names
+    refused     => undef,   # path of the last match refused for its method
     legacy_resources => $args{legacy_resources},
   );
 
@@ -278,6 +279,19 @@ sub _build_route {
 
 # A route name or path under this scope's prefix. A route with no name stays
 # unnamed whatever the scope is called.
+# Args laid over this scope's. Methods given here replace the scope's
+# rather than adding to them, so a route can narrow what its scope allows.
+sub _scoped_args {
+  my $self = shift;
+  my %args = @_;
+
+  my %scope = %{ $self->{args} };
+  delete $scope{methods} if @{ $args{methods} || [] };
+
+  return $self->_args(%scope, %args);
+}
+
+
 sub _qualify {
   my $self = shift;
   my ($name, $path) = @_;
@@ -299,11 +313,7 @@ sub add {
   ($name, $path) = $self->_qualify($name, $path);
   length $path or croak 'no route path supplied';
 
-  my %args = $self->_args(
-    %{ $self->{args} },
-    $self->_args(@_),
-    methods => $methods,
-  );
+  my %args = $self->_scoped_args($self->_args(@_, methods => $methods));
 
   my $table = $self->{table};
 
@@ -317,6 +327,18 @@ sub add {
   my ($route, $regex, $captures) = $self->_build_route($path, \%args);
 
   my $index = $self->_group_index($path);
+
+  # A second name for a route is fine; a second payload is never reached.
+  foreach my $earlier (@{ $table->{routes}[ $index ] || [] }) {
+    my %taken = map { $_ => 1 } @{ $earlier->{methods} };
+    next if %taken and !@methods || grep { !$taken{ $_ } } @methods;
+    last if Data::Dump::dump($earlier->{payload}) eq Data::Dump::dump($payload);
+
+    croak sprintf "route %s can never match: %s already takes %s %s",
+      map({ defined $_->{name} ? "'$_->{name}'" : 'with no name' }
+        { name => $name }, $earlier),
+      join(',', @methods) || 'every method on', $path;
+  }
 
   local $_ = {
     name    => $name,
@@ -332,20 +354,29 @@ sub add {
 
   push @{ $table->{routes}[ $index ] ||= [] }, $_;
   $table->{name_index}{ $name } = $_ if defined $name;
-  $table->{regex} = $table->{static} = undef; # force recompile
+  $table->{methods}{ $_ } = 1 foreach @methods;
+  $table->{compiled} = {};
 
   return $self;
 }
 
 
-# Sets the table's regex and its static index. A path with no placeholder
-# is looked up in the index instead of the regex, unless an earlier route
-# with a placeholder also matches it: that route is the first match.
+# The matcher for one request method: a regex over the paths with a route
+# that takes the method, so the first match is the answer, and an index of
+# literal paths. A literal path is looked up in the index instead of the
+# regex, unless an earlier path with a placeholder also matches it.
+#
+# $method is '' for a match given no method, and '*' for one given a method
+# no route names; only routes that take every method answer that.
 sub _compile {
-  my $self = shift;
+  my $self   = shift;
+  my $method = shift // '';
 
   my $table = $self->{table};
-  my @groups = map { $_->[0] } @{ $table->{routes} };
+  my @groups =
+    map  { $_->[0] }
+    grep { $self->_route_for_method($_, $method) }
+    @{ $table->{routes} };
 
   # Tested faster to terminate each route with \z rather than placing
   # at end of combined regex.
@@ -367,12 +398,29 @@ sub _compile {
     $static{ $_->{path} } = $_->{index};
   }
 
-  $table->{static} = \%static;
-  return $table->{regex} = $regex;
+  return $table->{compiled}{ $method } = [ $regex, \%static ];
 }
 
 
 sub _match_class { 'Router::Right::Match' }
+
+
+# The first of a path's routes to take the method; the first of them when
+# no method is given. '*' stands for a method no route names.
+sub _route_for_method {
+  my $self   = shift;
+  my $routes = shift;
+  my $method = shift;
+
+  defined $method && length $method or return $routes->[0];
+
+  foreach my $route (@$routes) {
+    my $allowed = $route->{methods};
+    return $route if !@$allowed or any { $method eq $_ } @$allowed;
+  }
+
+  return;
+}
 
 
 sub match {
@@ -381,50 +429,40 @@ sub match {
   my $method = shift;
 
   my $table = $self->{table};
-  my $regex = $table->{regex} || $self->_compile;
-
   my $match = $table->{match};
   $$match = undef;
-  $table->{error} = undef;
+  $table->{error} = $table->{refused} = undef;
 
-  my $routes;
+  $method = defined $method && length $method ? uc $method : '';
+  my $key = !length $method || $table->{methods}{ $method } ? $method : '*';
+
+  my ($regex, $static) =
+    @{ $table->{compiled}{ $key } || $self->_compile($key) };
+
   my %captured;
-  if (defined(my $index = $table->{static}{ $path })) {
-    $routes = $table->{routes}[ $$match = $index ];
-  } else {
+  my $index = $static->{ $path };
+  if (!defined $index) {
     local $MATCHED;
-    $path =~ $regex or return $self->error(NOT_FOUND);
+    if ($path !~ $regex) {
+      length $key && $self->_path_exists($path)
+        or return $self->error(NOT_FOUND);
 
-    $$match = $MATCHED // croak 'route matched, but no group index was set';
-    $routes = $table->{routes}[ $$match ]
-      or croak "no route defined for match index '$$match'?!";
+      $table->{refused} = $path;
+      return $self->error(METHOD_NOT_ALLOWED);
+    }
+    $index = $MATCHED // croak 'route matched, but no group index was set';
 
     # Read by name: copying %+ walks every name in the combined regex.
-    foreach (@{ $routes->[0]{captures} }) {
+    foreach (@{ $table->{routes}[ $index ][0]{captures} }) {
       my $value = $+{ $_ };
       $captured{ $_ } = $value if defined $value;
     }
   }
 
-  my $matched_route;
-
-  if ($method) {
-    foreach (@$routes) {
-      my $allowed = $_->{methods};
-      if (@$allowed) {
-        $matched_route = $_ if any { uc $method eq $_ } @$allowed;
-      } else { # no allowed means any method is accepted
-        $matched_route = $_;
-      }
-      last if $matched_route;
-    }
-  } else {
-    $matched_route = $routes->[0];
-  }
-
-  $matched_route or return $self->error(METHOD_NOT_ALLOWED);
-
-  # use Data::Dumper; warn Dumper($matched_route), "\n";
+  $$match = $index;
+  my $matched_route =
+    $self->_route_for_method($table->{routes}[ $index ], $key)
+    or croak "no route for method '$method' at match index '$index'?!";
 
   my $payload = { %{ $matched_route->{payload} }, %captured };
   my $match_class = $self->_match_class;
@@ -513,9 +551,8 @@ sub url {
   }
 
   my $uri = URI->new(join '', @path);
-  if (my @query = map { $_ => $args{ $_ } } grep { exists $args{ $_ } } @order) {
-    $uri->query_form(\@query);
-  }
+  my @query = map { $_ => $args{ $_ } } grep { exists $args{ $_ } } @order;
+  $uri->query_form(\@query) if @query;
 
   return $uri;
 }
@@ -544,10 +581,8 @@ sub with {
     table => $self->{table},
     name  => $name,
     path  => $path,
-    args  => scalar $self->_args(
-      %{ $self->{args} },
-      %args,
-      methods => $methods,
+    args  => scalar $self->_scoped_args(
+      $self->_args(%args, methods => $methods)
     ),
   }, ref $self;
 
@@ -560,12 +595,36 @@ sub with {
 }
 
 
+# Whether any route has this path, whatever its methods.
+sub _path_exists {
+  my $self = shift;
+  my $path = shift;
+
+  my ($regex, $static) =
+    @{ $self->{table}{compiled}{''} || $self->_compile('') };
+
+  return exists $static->{ $path } || $path =~ $regex;
+}
+
+
+# Every path that matches, whatever its methods.
+sub _groups_matching {
+  my $self = shift;
+  my $path = shift;
+
+  return
+    map  { $_->[0]{index} }
+    grep { $path =~ ($_->[0]{anchored} ||= qr/\A(?:$_->[0]{regex})\z/) }
+    @{ $self->{table}{routes} };
+}
+
+
 sub allowed_methods {
   my $self = shift;
 
   my $table = $self->{table};
 
-  my $index;
+  my @indexes;
   if (@_) {
     my $path;
     if ($_[0] !~ m{/}) { # route name, not path
@@ -576,16 +635,19 @@ sub allowed_methods {
       $path = shift;
     }
 
-    $index = $table->{route_index}{ $path };
+    @indexes = ($table->{route_index}{ $path });
   } else {
-    $index = ${ $table->{match} };
+    @indexes = defined $table->{refused}
+      ? $self->_groups_matching($table->{refused})
+      : (${ $table->{match} });
   }
-  defined $index or return;
+  defined $indexes[0] or return;
 
-  my $routes = $table->{routes}[ $index ]
-    or croak "no routes found for index '$index'?!";
+  my @routes = map {
+    @{ $table->{routes}[ $_ ] or croak "no routes found for index '$_'?!" }
+  } @indexes;
 
-  my $allowed = $self->_methods(map { $_->{methods} } @$routes);
+  my $allowed = $self->_methods(map { $_->{methods} } @routes);
   return wantarray ? @$allowed : $allowed;
 }
 
@@ -699,7 +761,15 @@ sub resource {
   my $id = delete $args{id};
   $id = defined $id ? "{id:$id}" : '{id}';
 
+  # A pattern for the format, or a false value for routes with no format.
+  my $format = '{.format}';
+  if (exists $args{format}) {
+    my $pattern = delete $args{format};
+    $format = $pattern ? "{.format:$pattern}" : '';
+  }
+
   my @table = $self->_resource_table;
+  @table = grep { $_->[3] !~ /\{format\}/ } @table if !$format;
   my %known = map { $_->[0] => 1 } @table;
 
   my $only   = delete $args{only};
@@ -747,6 +817,7 @@ sub resource {
       my ($action, $name, $methods, $path) = @$_;
       $name =~ s/%([mc])/$name{ $1 }/g if defined $name;
       $path =~ s/\{id\}/$id/;
+      $path =~ s/\{\.format\}/$format/;
       $add->($scope, $action, $name, "$methods /$plural$path");
     }
 
@@ -864,7 +935,10 @@ as part of the route path itself. e.g.,
 
 =item match($url [, $method])
 
-Attempts to find a route that matches the supplied $url. Routes are matched in the order defined.
+Attempts to find a route that matches the supplied $url. Routes are matched
+in the order defined: the first whose path matches and which takes $method
+is the match, so a route may share a path with an earlier one that takes
+other methods, however either path is written.
 
 If a match is found, its associated payload is returned. If not, undef is returned and the error() method will indicate why the match failed.
 
@@ -876,6 +950,9 @@ C<regex> and C<args>. Any other method name dies.
 
 $method, if supplied, is the HTTP method of the request (e.g., GET, POST, etc.). Specifying $method may prevent a route from otherwise matching if the route was defined with a restricted set of allowed methods (see ROUTE DEFINITION). By default, all request methods are allowed.
 
+A placeholder's value replaces a payload value of the same name, so a
+route such as C</{controller}/{action}> lets the path choose both.
+
 =item error()
 
 Returns the error code of the last failed match.
@@ -883,7 +960,10 @@ Returns the error code of the last failed match.
   404 = no match found
   405 = method not allowed
 
-A 405 result indicates a match was found, but the request method was not allowed. allowed_methods() can be called to obtain a list of the methods that are permitted for the route.
+A 405 result indicates that routes have this path, but none of them takes
+the request method. allowed_methods() can be called to obtain the methods
+they do take. A route that takes every method, such as a catch-all at the
+end, matches instead, so there is no 405 for a path it covers.
 
 The above error codes are also available as symbolic constants through the NOT_FOUND and
 METHOD_NOT_ALLOWED functions.
@@ -895,7 +975,10 @@ permitted.
 
 If route $name is supplied, returns its permitted methods. Returns undef in scalar context if the route is unknown. If $name contains a forward slash, it's intepreted as a route path, instead.
 
-With no argument, returns the methods permitted by the last match() attempt. Returns undef in scalar context if there was no prior match.
+With no argument, returns the methods permitted by the last match()
+attempt: those of the matched path, or after a 405 those of every route
+whose path matched. Returns undef in scalar context if there was no prior
+match.
 
   $r->add(entries => 'PUT|GET /entries', { controller => 'Entries' });
   print join(', ', $r->allowed_methods('entries')), "\n"; # prints GET, PUT
@@ -983,6 +1066,9 @@ a subclass is an instance of that subclass. Scopes nest: calling with() on a
 scope joins the names with an underscore, concatenates the paths and merges
 the options.
 
+Methods are the exception to merging. A route or inner scope that names
+its own methods takes those alone; one that names none takes its scope's.
+
 =item resource($name, \%payload [, %options])
 
 Adds the routes to list, create, read, update and delete a resource:
@@ -1030,6 +1116,11 @@ before /messages/{id}.
 =item id => $regex
 
 A pattern the id must match, as in C<{id:\d+}>.
+
+=item format => $regex
+
+A pattern the format must match, as in C<{.format:json|csv}>; an id may
+then contain a dot. A false value builds the routes with no format.
 
 =item actions => { $action => $payload }
 
@@ -1087,6 +1178,14 @@ The special {.format} placeholder can be used to allow an optional file extensio
 
   # And to build a URL from it:
   $r->url('download', file => 'foo', format => 'bz2'); # /dl/foo.bz2
+
+The format is what follows the last dot, so /dl/a.b.gz gives the file
+"a.b". Give the format a pattern to leave other dots to the placeholder
+before it: with C<{file}{.format:gz|bz2}>, /dl/john.smith is all file.
+
+A route is refused when an earlier route with the same path already takes
+all of its methods and has a different payload, since it could never
+match. With the same payload it is accepted, as a second name for url().
 
 =head1 SEE ALSO
 

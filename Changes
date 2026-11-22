@@ -1,5 +1,22 @@
 2.00 (unreleased)
 
+  - match() gives a request to the first route whose path matches and
+    which takes its method. Before, the first path to match decided: if
+    its routes refused the method the result was a 405, though a later
+    route took it. A 405 now means no route with that path takes the
+    method, and allowed_methods() then lists the methods of all of them.
+    With a catch-all route that takes every method there is no 405.
+
+  - A route or scope that names its own methods no longer adds its
+    scope's to them: with('POST /a')->add('GET /b') takes GET alone.
+
+  - add() refuses a route that could never match, because an earlier
+    route with the same path takes all of its methods and has a
+    different payload. With the same payload it is a second name.
+
+  - resource() takes format, a pattern for the format (so an id may hold
+    a dot) or a false value for routes with no format.
+
   - match() looks a path with no placeholder up in a hash rather than the
     regex, and reads only the matched route's captures. url() builds its
     query in one pass. Tie::IxHash is no longer needed.

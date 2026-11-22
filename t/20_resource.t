@@ -168,6 +168,52 @@ a_b_c_formatted_edit_user GET    /a/b/c/users/{id}.{format}/edit { action => "ed
       like $@, qr/invalid value for param 'id'/;
     };
 
+    it 'gives what follows the last dot to the format' => sub {
+      $r->resource('user', 'User');
+
+      my $match = $r->match('/users/john.q.smith', 'GET');
+      is $match->{id}, 'john.q';
+      is $match->{format}, 'smith';
+    };
+
+    it 'constrains the format, leaving other dots to the id' => sub {
+      $r->resource('user', 'User', format => 'json|csv');
+
+      is_deeply $r->match('/users/john.smith', 'GET'),
+        { controller => 'User', action => 'show', id => 'john.smith' };
+      is_deeply $r->match('/users/john.smith.json', 'GET'), {
+        controller => 'User', action => 'show',
+        id => 'john.smith', format => 'json',
+      };
+      is $r->url('user_edit', id => 7, format => 'csv'), '/users/7/edit.csv';
+    };
+
+    it 'builds routes with no format' => sub {
+      $r->resource('user', 'User', format => 0, only => [qw/ index show /]);
+
+      is trimmed($r->as_string), trimmed(q{
+        users GET /users { action => "index", controller => "User" }
+        user GET /users/{id} { action => "show", controller => "User" }
+      });
+      is $r->match('/users/john.smith', 'GET')->{id}, 'john.smith';
+    };
+
+    it 'builds legacy routes with no format' => sub {
+      my $legacy = $CLASS->new(legacy_resources => 1);
+      $legacy->resource('user', 'User', format => 0);
+
+      is scalar(() = $legacy->routes), 7;
+      is $legacy->url('edit_user', id => 7), '/users/7/edit';
+    };
+
+    it 'lets a route defined first keep a method of its own' => sub {
+      $r->add(patch => 'PATCH /users/{id}{.format}', 'User#patch');
+      $r->resource('user', 'User');
+
+      is $r->match('/users/7', 'PATCH')->{action}, 'patch';
+      is $r->match('/users/7', 'PUT')->{action}, 'update';
+    };
+
     it 'takes PUT or PATCH for update' => sub {
       $r->resource('message', 'Message');
 

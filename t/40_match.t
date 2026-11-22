@@ -222,6 +222,15 @@ describe 'Router' => sub {
     };
   };
 
+  describe 'a placeholder' => sub {
+    it 'replaces a payload value of the same name' => sub {
+      $r->add(any => '/c/{controller}/{action}', 'Default#index');
+
+      is_deeply $r->match('/c/Thing/list'),
+        { controller => 'Thing', action => 'list' };
+    };
+  };
+
   describe 'format placeholder' => sub {
     before each => sub {
       $r->add(dl => '/dl/{file}{.format}', 'Download');
@@ -288,13 +297,72 @@ describe 'Router' => sub {
         is_deeply [ $r->allowed_methods('/foo') ], [qw/ GET PUT /];
       };
 
-    it 'give a path defined twice to the first route for that method' =>
+    it 'give a path to a later route when the first refuses the method' =>
       sub {
-        $r->add(first  => 'GET /foo', 'Foo#first');
-        $r->add(second => 'GET /foo', 'Foo#second');
+        $r->add(show    => 'GET /x/{id}', 'X#show');
+        $r->add(special => 'POST /x/special', 'X#special');
+        $r->add(update  => 'PUT /x/{id:\d+}', 'X#update');
 
-        is $r->match('/foo', 'GET')->{action}, 'first';
+        is $r->match('/x/special', 'POST')->{action}, 'special';
+        is $r->match('/x/special', 'GET')->{action}, 'show';
+        is_deeply $r->match('/x/7', 'PUT'),
+          { controller => 'X', action => 'update', id => 7 };
+        is $r->match('/x/7', 'PUT')->name, 'update';
+        ok !$r->error;
       };
+
+    it 'report every method the path takes when none of them fits' => sub {
+      $r->add(show    => 'GET /x/{id}', 'X#show');
+      $r->add(special => 'POST /x/special', 'X#special');
+      $r->add(update  => 'PUT /x/{id:\d+}', 'X#update');
+
+      ok !$r->match('/x/special', 'DELETE');
+      is $r->error, 405;
+      is_deeply [ $r->allowed_methods ], [qw/ GET POST /];
+
+      ok !$r->match('/x/7', 'DELETE');
+      is_deeply [ $r->allowed_methods ], [qw/ GET PUT /];
+
+      ok $r->match('/x/7', 'GET');
+      is_deeply [ $r->allowed_methods ], ['GET'];
+    };
+
+    it 'are matched in any letter case' => sub {
+      $r->add(show => 'get /foo', 'Foo#show');
+
+      is $r->match('/foo', 'Get')->{action}, 'show';
+    };
+
+    it 'give a method no route names to a route taking every method' => sub {
+      $r->add(show => 'GET /foo', 'Foo#show');
+      $r->add(any  => '/bar', 'Bar#any');
+
+      is $r->match('/bar', 'PROPFIND')->{action}, 'any';
+      ok !$r->match('/foo', 'PROPFIND');
+      is $r->error, 405;
+      ok !$r->match('/baz', 'PROPFIND');
+      is $r->error, 404;
+    };
+
+    it 'tell a path no route has from a method its routes refuse' => sub {
+      $r->add(lit => 'GET /foo', 'Foo#show');
+      $r->add(dyn => 'GET /x/{id}', 'X#show');
+
+      foreach ([ '/foo' => 405 ], [ '/x/7' => 405 ], [ '/nope' => 404 ],
+               [ '/x/7/8' => 404 ]) {
+        my ($path, $status) = @$_;
+        ok !$r->match($path, 'POST');
+        is $r->error, $status, "POST $path";
+      }
+    };
+
+    it 'take a route added after a match for the same method' => sub {
+      $r->add(show => 'GET /foo', 'Foo#show');
+      ok !$r->match('/foo', 'POST');
+
+      $r->add(create => 'POST /foo', 'Foo#create');
+      is $r->match('/foo', 'POST')->{action}, 'create';
+    };
 
     it 'give the first route when no method is supplied' => sub {
       $r->add(show   => 'GET /foo', 'Foo#show');

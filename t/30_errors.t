@@ -144,6 +144,41 @@ describe 'Router' => sub {
     };
   };
 
+  describe 'a route that can never match' => sub {
+    it 'is refused when an earlier one takes its path and methods' => sub {
+      $r->add(first => 'GET /foo', 'First');
+
+      eval { $r->add(second => 'GET /foo', 'Second') };
+      like $@, qr/route 'second' can never match: 'first' already takes GET \/foo/;
+    };
+
+    it 'is refused behind a route that takes every method' => sub {
+      $r->add(undef, '/foo', 'First');
+
+      eval { $r->add(second => 'POST /foo', 'Second') };
+      like $@, qr/'second' can never match: with no name already takes POST/;
+
+      eval { $r->add(third => '/foo', 'Third') };
+      like $@, qr/'third' can never match: .* takes every method on \/foo/;
+    };
+
+    it 'is accepted as a second name for the same payload' => sub {
+      $r->add(undef, 'GET /foo', 'First#show');
+      $r->add(foo => 'GET /foo', { controller => 'First', action => 'show' });
+
+      is $r->url('foo'), '/foo';
+      is scalar(() = $r->routes), 2;
+    };
+
+    it 'is accepted when it takes a method the earlier one does not' => sub {
+      $r->add(first => 'GET /foo', 'First');
+      $r->add(second => '/foo', 'Second');
+
+      is $r->match('/foo', 'GET')->{controller}, 'First';
+      is $r->match('/foo', 'POST')->{controller}, 'Second';
+    };
+  };
+
   describe 'resource' => sub {
     it 'requires a member name' => sub {
       eval { $r->resource };
