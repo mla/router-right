@@ -20,10 +20,10 @@ our @EXPORT_OK = qw/ NOT_FOUND METHOD_NOT_ALLOWED /;
 sub NOT_FOUND          () { 404 }
 sub METHOD_NOT_ALLOWED () { 405 }
 
-# Set by the compiled regex to the index of the route group that matched. A
-# package variable, not a closure: before 5.18 a code block in a regex built
-# at run time does not see the lexicals around it.
-our $MATCHED;
+# Set by a successful match to the name of the (*MARK) it passed through,
+# which is the index of the route group that matched. Perl sets it in the
+# package of the code running the match, so it must be this one.
+our $REGMARK;
 
 
 sub new {
@@ -347,10 +347,13 @@ sub add {
 }
 
 
-# The matcher for one request method: a regex over the paths with a route
-# that takes the method, so the first match is the answer, and an index of
-# literal paths. A literal path is looked up in the index instead of the
-# regex, unless an earlier path with a placeholder also matches it.
+# The matcher for one request method, over the paths with a route that
+# takes it: an index of literal paths, and a tree of the others keyed by
+# the whole literal segments they start with. Each node holds a regex over
+# its routes and its ancestors', in the order defined, so the first match
+# in the node a path reaches is the answer, and a request is tried only
+# against routes that could match it. A literal path is looked up in the
+# index instead, unless an earlier route with a placeholder matches it.
 #
 # $method is '' for every path whatever its methods, and '*' for a method
 # no route names, which only routes taking every method answer.
@@ -368,35 +371,76 @@ sub _compile {
   my @groups = grep { $_ } @takes;
 
   # Methods taken on the same paths, as GET and HEAD usually are, share a
-  # regex and literal index; only the route each takes differs.
+  # tree and literal index; only the route each takes differs.
   my $paths = join ',', map { $_->{index} } @groups;
   my $shared = $table->{shared}{ $paths } ||= do {
-    # Tested faster to terminate each route with \z rather than placing
-    # at end of combined regex.
-    my $regex = join '|',
-      map {
-        "(?: $_->{regex} \\z (?{ \$Router::Right::MATCHED = $_->{index} }))"
-      }
-      grep { @{ $_->{route} } > 1 }
-      @groups
-    ;
-
-    {
-      use re 'eval';
-      $regex = length $regex ? qr/\A (?: $regex )/x : qr/(?!)/;
+    my $root = [ {}, undef, [] ]; # child by segment, regex, groups
+    foreach my $group (grep { @{ $_->{route} } > 1 } @groups) {
+      my $node = $root;
+      $node = $node->[0]{ $_ } ||= [ {}, undef, [] ]
+        foreach _segments($group->{route}[0]);
+      push @{ $node->[2] }, $group;
     }
+    _compile_node($root, []);
 
     my %static;
     foreach (grep { @{ $_->{route} } == 1 } @groups) {
-      local $MATCHED;
-      next if $_->{path} =~ $regex && $MATCHED < $_->{index};
+      next if $_->{path} =~ _node($root, $_->{path})->[1]
+        && $REGMARK < $_->{index};
       $static{ $_->{path} } = $_->{index};
     }
 
-    [ $regex, \%static ];
+    [ $root, \%static ];
   };
 
   return $table->{compiled}{ $method } = [ @$shared, \@takes ];
+}
+
+
+# The whole segments a route's leading literal holds: '/a/b/' and '/a/b/c'
+# give (a, b), the segment holding the first placeholder left out.
+sub _segments {
+  my $literal = shift;
+
+  $literal =~ s{\A/}{} or return;
+  my @segments = split m{/}, $literal, -1;
+  pop @segments;
+
+  return @segments;
+}
+
+
+sub _compile_node {
+  my ($node, $inherited) = @_;
+
+  # Both lists are in the order defined; merged, they stay so.
+  my @groups =
+    sort { $a->{index} <=> $b->{index} } @$inherited, @{ $node->[2] };
+  $node->[2] = \@groups;
+
+  # Tested faster to terminate each route with \z rather than placing
+  # at end of combined regex.
+  my $regex = join '|',
+    map { "(?: $_->{regex} \\z (*MARK:$_->{index}))" }
+    @groups;
+
+  $node->[1] = length $regex ? qr/\A (?: $regex )/x : qr/(?!)/;
+
+  _compile_node($_, \@groups) foreach values %{ $node->[0] };
+}
+
+
+# The deepest node a path reaches, a whole segment at a time.
+sub _node {
+  my ($node, $path) = @_;
+
+  my $at = 1;
+  while ((my $end = index $path, '/', $at) > 0) {
+    $node = $node->[0]{ substr $path, $at, $end - $at } || last;
+    $at = $end + 1;
+  }
+
+  return $node;
 }
 
 
@@ -434,26 +478,24 @@ sub _route_for_method {
 }
 
 
-# Whether any route has this path, whatever its methods.
-sub _path_exists {
-  my $self = shift;
-  my $path = shift;
-
-  my ($regex, $static) = @{ $self->_matcher('') };
-
-  return exists $static->{ $path } || $path =~ $regex;
-}
-
-
 # Every path that matches, whatever its methods.
 sub _groups_matching {
   my $self = shift;
   my $path = shift;
 
-  return
-    map  { $_->[0]{index} }
-    grep { $path =~ ($_->[0]{anchored} ||= qr/\A(?:$_->[0]{regex})\z/) }
-    @{ $self->{table}{routes} };
+  my $table = $self->{table};
+  my ($root) = @{ $self->_matcher('') };
+
+  # A literal route's path is the path it matches.
+  my $literal = $table->{route_index}{ $path };
+  $literal = undef
+    if defined $literal && @{ $table->{routes}[ $literal ][0]{route} } > 1;
+
+  return sort { $a <=> $b }
+    (grep { defined } $literal),
+    map  { $_->{index} }
+    grep { $path =~ ($_->{anchored} ||= qr/\A(?:$_->{regex})\z/) }
+    @{ _node($root, $path)->[2] };
 }
 
 
@@ -472,21 +514,36 @@ sub match {
   # owns the request, and is a 405 when none of its routes takes the method.
   my $legacy = $table->{legacy_methods};
   my $key = $legacy ? '' : $method;
-  my ($regex, $static, $takes) =
+  my ($root, $static, $takes) =
     @{ $table->{compiled}{ $key } || $self->_matcher($key) };
 
   my %captured;
   my $index = $static->{ $path };
   if (!defined $index) {
-    local $MATCHED;
-    if ($path !~ $regex) {
-      !$legacy && length $method && $self->_path_exists($path)
-        or return $self->error(NOT_FOUND);
+    # _node(), inline: this is the hot path.
+    my ($node, $at) = ($root, 1);
+    while ((my $end = index $path, '/', $at) > 0) {
+      $node = $node->[0]{ substr $path, $at, $end - $at } || last;
+      $at = $end + 1;
+    }
+
+    if ($path !~ $node->[1]) {
+      # A 405 if a route for another method has the path. Not when this
+      # matcher already covers every path, as the one for '' does.
+      my ($all, $paths) = @{ $table->{compiled}{''} || $self->_matcher('') };
+      $all != $root && (exists $paths->{ $path } || do {
+        ($node, $at) = ($all, 1);
+        while ((my $end = index $path, '/', $at) > 0) {
+          $node = $node->[0]{ substr $path, $at, $end - $at } || last;
+          $at = $end + 1;
+        }
+        $path =~ $node->[1];
+      }) or return $self->error(NOT_FOUND);
 
       $table->{refused} = $path;
       return $self->error(METHOD_NOT_ALLOWED);
     }
-    $index = $MATCHED // croak 'route matched, but no group index was set';
+    $index = $REGMARK;
 
     # Read here, while %+ is this match's, and by name: copying %+ walks
     # every name in the combined regex.
