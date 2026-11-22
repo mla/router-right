@@ -11,6 +11,19 @@
     linear in the routes, not quadratic. The matched route is recorded
     with (*MARK) rather than a code block, so `use re 'eval'` is gone.
 
+  - Routes that start with a placeholder (/{lang}/about, a catch-all)
+    are no longer copied into the regex of every node below the root.
+    Each node's regex holds its own routes, and a request tries its node
+    and the nodes above it in the order of their earliest route,
+    stopping once no earlier route is left. Each node matches its shared
+    literal before the alternation rather than letting Perl build a trie
+    on it, which tried alternatives that all matched in quadratic time,
+    and a node with more than 32 routes matches without capturing and
+    reads the values from the matched route's own regex. Before, 300
+    such routes made every match about 280 microseconds, and 1,000 made
+    it 2.8 milliseconds with a 500 MB matcher; now about 12 and 25
+    microseconds and 8 MB. The single regex before the tree cost the same.
+
   - Router::Right->new(legacy => 1) keeps the behaviour of 1.05 for
     routes written for it: the resource routes and the method rule
     described below (also legacy_resources and legacy_methods, each on

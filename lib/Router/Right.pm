@@ -25,6 +25,11 @@ sub METHOD_NOT_ALLOWED () { 405 }
 # package of the code running the match, so it must be this one.
 our $REGMARK;
 
+# A node with more routes than this matches without the placeholders'
+# captures, and the matched route's own regex takes them: each capture in
+# the alternation slows every branch tried, so a large node pays for many.
+our $CAPTURE_LIMIT = 32;
+
 
 sub new {
   my $class = shift;
@@ -219,7 +224,9 @@ sub _build_route {
 
   my @route = $class->_split_placeholders($route);
   my @regex;
+  my @bare;
   my @captures;
+  my $refers = 0;
   my $is_placeholder = 0;
   my %placeholders;
   foreach (@route) {
@@ -255,14 +262,24 @@ sub _build_route {
       push @regex, $format
         ? "(?:\\.(?<$pname>$regex))?"
         : "(?<$pname>$regex)";
+      push @bare, $format ? "(?:\\.(?:$regex))?" : "(?:$regex)";
+
+      # A pattern that refers to a group by name needs the names kept.
+      $refers ||= $regex =~ /\\k|\\g\{?[A-Za-z_]|\(\?(?:&|P[=>])/;
     } else {
       push @regex, quotemeta($_); # literal
+      push @bare, quotemeta($_);
     }
   } continue {
     $is_placeholder = !$is_placeholder;
   }
 
-  return \@route, join('', @regex), \@captures;
+  # The regex without the placeholders' own captures, for the combined
+  # regex: a capture in each of many alternatives slows every branch.
+  my $regex = join '', @regex;
+  my $bare = $refers ? $regex : join '', @bare;
+
+  return \@route, $regex, \@captures, $bare;
 }
 
 
@@ -306,7 +323,7 @@ sub add {
 
   my @methods = $self->_methods($args{methods});
 
-  my ($route, $regex, $captures) = $self->_build_route($path);
+  my ($route, $regex, $captures, $bare) = $self->_build_route($path);
 
   my $index = $self->_group_index($path);
 
@@ -331,6 +348,7 @@ sub add {
     route   => $route,
     index   => $index,
     regex   => $regex,
+    bare    => $bare,
     captures => $captures,
     methods => \@methods,
     payload => $payload,
@@ -374,10 +392,12 @@ sub _compile {
   # tree and literal index; only the route each takes differs.
   my $paths = join ',', map { $_->{index} } @groups;
   my $shared = $table->{shared}{ $paths } ||= do {
-    my $root = [ {}, undef, [] ]; # child by segment, regex, groups
+    # child by segment, regex, its groups, chain, lowest index, captures,
+    # fast (see _compile_node)
+    my $root = [ {}, undef, [], undef, undef ];
     foreach my $group (grep { @{ $_->{route} } > 1 } @groups) {
       my $node = $root;
-      $node = $node->[0]{ $_ } ||= [ {}, undef, [] ]
+      $node = $node->[0]{ $_ } ||= [ {}, undef, [], undef, undef ]
         foreach _segments($group->{route}[0]);
       push @{ $node->[2] }, $group;
     }
@@ -385,8 +405,8 @@ sub _compile {
 
     my %static;
     foreach (grep { @{ $_->{route} } == 1 } @groups) {
-      next if $_->{path} =~ _node($root, $_->{path})->[1]
-        && $REGMARK < $_->{index};
+      my $earlier = _search(_node($root, $_->{path}), $_->{path});
+      next if defined $earlier && $earlier < $_->{index};
       $static{ $_->{path} } = $_->{index};
     }
 
@@ -410,23 +430,62 @@ sub _segments {
 }
 
 
+# A node's regex is over its own routes only, in the order defined, so its
+# first match is the earliest of them to match. A route an ancestor holds
+# is not repeated below it: the chain, the node and its ancestors that hold
+# routes, ordered by the earliest route each holds, is searched instead.
 sub _compile_node {
-  my ($node, $inherited) = @_;
+  my ($node, $ancestors) = @_;
 
-  # Both lists are in the order defined; merged, they stay so.
-  my @groups =
-    sort { $a->{index} <=> $b->{index} } @$inherited, @{ $node->[2] };
-  $node->[2] = \@groups;
+  my $groups = $node->[2];
 
-  # Tested faster to terminate each route with \z rather than placing
-  # at end of combined regex.
-  my $regex = join '|',
-    map { "(?: $_->{regex} \\z (*MARK:$_->{index}))" }
-    @groups;
+  if (@$groups) {
+    # The literal every route here starts with is matched once, ahead of
+    # the alternation. Left in it, Perl would build a trie on it, and a trie
+    # whose words all match tries them in quadratic time.
+    my $prefix = $groups->[0]{route}[0];
+    foreach (@$groups) {
+      chop $prefix while index($_->{route}[0], $prefix) != 0;
+    }
+    my $skip = length quotemeta $prefix;
 
-  $node->[1] = length $regex ? qr/\A (?: $regex )/x : qr/(?!)/;
+    # Tested faster to terminate each route with \z rather than placing
+    # at end of combined regex.
+    my $captures = @$groups <= $CAPTURE_LIMIT;
+    my $field = $captures ? 'regex' : 'bare';
+    my $regex = join '|',
+      map { '(?: ' . substr($_->{ $field }, $skip) . " \\z (*MARK:$_->{index}))" }
+      @$groups;
+    $node->[5] = $captures;
+    $node->[1] = qr/\A \Q$prefix\E (?: $regex )/x;
+    $node->[4] = $groups->[0]{index};
+  }
 
-  _compile_node($_, \@groups) foreach values %{ $node->[0] };
+  my @holding = grep { @{ $_->[2] } } @$ancestors, $node;
+  $node->[3] = [ sort { $a->[4] <=> $b->[4] } @holding ];
+
+  # The usual case, which match() takes without the chain: the node is the
+  # only one holding routes for its paths, and captures their values.
+  $node->[6] = @holding == 1 && $holding[0] == $node && $node->[5];
+
+  _compile_node($_, \@holding) foreach values %{ $node->[0] };
+}
+
+
+# The earliest route in a node's chain to match the path, or undef.
+# In the chain's order, a node whose earliest route comes after the best
+# match so far cannot improve on it, nor can any node after it.
+sub _search {
+  my ($node, $path) = @_;
+
+  my $best;
+  foreach my $n (@{ $node->[3] }) {
+    last if defined $best && $best < $n->[4];
+    $path =~ $n->[1] or next;
+    $best = $REGMARK if !defined $best || $REGMARK < $best;
+  }
+
+  return $best;
 }
 
 
@@ -495,7 +554,8 @@ sub _groups_matching {
     (grep { defined } $literal),
     map  { $_->{index} }
     grep { $path =~ ($_->{anchored} ||= qr/\A(?:$_->{regex})\z/) }
-    @{ _node($root, $path)->[2] };
+    map  { @{ $_->[2] } }
+    @{ _node($root, $path)->[3] };
 }
 
 
@@ -527,29 +587,53 @@ sub match {
       $at = $end + 1;
     }
 
-    if ($path !~ $node->[1]) {
+    # _search(), inline: this is the hot path. A node that captures has
+    # its values read here, while %+ is its own, and by name: copying %+
+    # walks every name in the regex.
+    my $read = $node->[6];
+    if ($read) {
+      if ($path =~ $node->[1]) {
+        $index = $REGMARK;
+        foreach (@{ $table->{routes}[ $index ][0]{captures} }) {
+          my $value = $+{ $_ };
+          $captured{ $_ } = $value if defined $value;
+        }
+      }
+    } else {
+      foreach my $n (@{ $node->[3] }) {
+        last if defined $index && $index < $n->[4];
+        $path =~ $n->[1] or next;
+        next if defined $index && $REGMARK > $index;
+        $index = $REGMARK;
+        %captured = ();
+        $read = $n->[5] or next;
+        foreach (@{ $table->{routes}[ $index ][0]{captures} }) {
+          my $value = $+{ $_ };
+          $captured{ $_ } = $value if defined $value;
+        }
+      }
+    }
+
+    if (!defined $index) {
       # A 405 if a route for another method has the path. Not when this
       # matcher already covers every path, as the one for '' does.
       my ($all, $paths) = @{ $table->{compiled}{''} || $self->_matcher('') };
-      $all != $root && (exists $paths->{ $path } || do {
-        ($node, $at) = ($all, 1);
-        while ((my $end = index $path, '/', $at) > 0) {
-          $node = $node->[0]{ substr $path, $at, $end - $at } || last;
-          $at = $end + 1;
-        }
-        $path =~ $node->[1];
-      }) or return $self->error(NOT_FOUND);
+      $all != $root && (exists $paths->{ $path }
+        || defined _search(_node($all, $path), $path))
+        or return $self->error(NOT_FOUND);
 
       $table->{refused} = $path;
       return $self->error(METHOD_NOT_ALLOWED);
     }
-    $index = $REGMARK;
 
-    # Read here, while %+ is this match's, and by name: copying %+ walks
-    # every name in the combined regex.
-    foreach (@{ $table->{routes}[ $index ][0]{captures} }) {
-      my $value = $+{ $_ };
-      $captured{ $_ } = $value if defined $value;
+    # A node that does not capture leaves the values to the route's regex.
+    my $route;
+    if (!$read && @{ ($route = $table->{routes}[ $index ][0])->{captures} }) {
+      $path =~ ($route->{anchored} ||= qr/\A(?:$route->{regex})\z/);
+      foreach (@{ $route->{captures} }) {
+        my $value = $+{ $_ };
+        $captured{ $_ } = $value if defined $value;
+      }
     }
   }
 
@@ -1293,10 +1377,19 @@ A route path with no placeholder is found with one hash lookup. The others
 are kept in a tree keyed by the whole literal segments they start with
 (C</admin/users/{id}> under C<admin>, then C<users>). A request walks the
 tree a segment at a time and is tried only against the routes in the node
-it reaches and the nodes above it, as one regex. A match costs about the
-same with a hundred routes or a hundred thousand. Routes that start with a
-placeholder, such as a catch-all C</{path:.*}>, sit at the root and are
-tried for every request, so keep them few.
+it reaches and the nodes above it. A match costs about the same with a
+hundred routes or a hundred thousand.
+
+Routes that start with a placeholder, such as C</{lang}/about> or a
+catch-all C</{path:.*}>, sit at the root, and a node's regex holds its own
+routes only. A request is tried against its node first and against the
+root only if a root route was defined earlier than the routes it matched,
+or it matched none; a catch-all defined last costs nothing until then.
+Defined first, the root's routes are tried on every request: three
+hundred of them add about six microseconds. A node with more than 32
+routes matches without capturing, then takes the values from the matched
+route's own regex, because captures in a long alternation slow every
+branch tried.
 
 The matchers are compiled on the first match for each request method. A
 server that forks its workers can call match() once per method before the
@@ -1319,6 +1412,13 @@ Give each placeholder a pattern that cannot take its neighbour's text
 one default placeholder per segment, C<{id}{.format}>, and a final
 C<{rest:.*}>, which accepts whatever is left. Nested quantifiers inside a
 pattern of your own, such as C<{x:(?:a+)+}>, are a hazard in any regex.
+
+=head2 Back-references in a placeholder's pattern
+
+Refer to a group in a pattern of your own by name (C<\k<name>>) or by
+relative number (C<\g{-1}>). A numbered back-reference such as C<\1>
+counts the groups of every route matched alongside it, so it refers to a
+different group depending on the routes around it.
 
 =head1 SEE ALSO
 
