@@ -54,6 +54,40 @@ describe 'Router' => sub {
       is $r->match('/x/7')->{controller}, 'Any';
     };
 
+    it 'gives a literal its path when an earlier pattern refuses it' => sub {
+      $r->add(num => '/x/{id:\d+}', 'Number');
+      $r->add(lit => '/x/new', 'Literal');
+
+      is $r->match('/x/new')->{controller}, 'Literal';
+      is $r->match('/x/7')->{controller}, 'Number';
+    };
+
+    it 'takes a route added after a match, in the order defined' => sub {
+      $r->add(lit => '/x/new', 'Literal');
+      is $r->match('/x/new')->{controller}, 'Literal';
+
+      $r->add(any  => '/x/{id}', 'Any');
+      $r->add(late => '/x/late', 'Late');
+
+      is $r->match('/x/new')->{controller}, 'Literal';
+      is $r->match('/x/late')->{controller}, 'Any';
+    };
+
+    it 'matches a literal path exactly' => sub {
+      $r->add(lit => '/x/new', 'Literal');
+
+      ok !$r->match($_), "'$_'" foreach '/x/new/', '/x/New', "/x/new\n", '/x';
+    };
+
+    it 'matches with literal routes alone, or none' => sub {
+      ok !$r->match('/x');
+
+      $r->add(lit => '/x', 'Literal');
+      is $r->match('/x')->{controller}, 'Literal';
+      ok !$r->match('/y');
+      is $r->error, 404;
+    };
+
     it 'falls through a pattern that refuses the value' => sub {
       $r->add(num  => '/x/{id:\d+}', 'Number');
       $r->add(word => '/x/{slug}', 'Word');
@@ -172,6 +206,19 @@ describe 'Router' => sub {
       $r->match('/c/other');
 
       is $r->_route('act')->{payload}{action}, 'fixed';
+    };
+  };
+
+  describe 'a capture named inside a pattern' => sub {
+    it 'is returned beside the placeholder' => sub {
+      $r->add(day => '/d/{date:(?<year>\d{4})-(?<month>\d\d)}', 'Day');
+
+      is_deeply $r->match('/d/1916-08'), {
+        controller => 'Day',
+        date       => '1916-08',
+        year       => 1916,
+        month      => '08',
+      };
     };
   };
 

@@ -1,5 +1,9 @@
 2.00 (unreleased)
 
+  - match() looks a path with no placeholder up in a hash rather than the
+    regex, and reads only the matched route's captures. url() builds its
+    query in one pass. Tie::IxHash is no longer needed.
+
   - resource() builds seven routes, not eleven. The formatted_ twins are
     gone (the {.format} routes beside them always matched first), update
     takes PATCH as well as PUT, and an edit path ends in its format

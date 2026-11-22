@@ -9,7 +9,6 @@ use Data::Dump ();
 use Lingua::EN::Inflect qw/ PL_N /;
 use List::Util qw/ max /;
 use List::MoreUtils qw/ any uniq /;
-use Tie::IxHash;
 use URI;
 use URI::QueryParam;
 
@@ -45,6 +44,7 @@ sub new {
     match       => \$match, # route group index of last match
     error       => undef,   # status code of last match
     regex       => undef,   # compiled on first match, dropped by add()
+    static      => undef,   # literal path => group index; built with regex
     legacy_resources => $args{legacy_resources},
   );
 
@@ -223,6 +223,7 @@ sub _build_route {
 
   my @route = $class->_split_placeholders($route);
   my @regex;
+  my @captures;
   my $is_placeholder = 0;
   my %placeholders;
   foreach (@route) {
@@ -259,6 +260,9 @@ sub _build_route {
         type     => $type,
       };
 
+      # A pattern may name captures of its own; match() returns those too.
+      push @captures, $pname, $regex =~ /\(\?P?[<']([A-Za-z_]\w*)[>']/g;
+
       my $opt = $optional ? '?' : '';
       push @regex, "(?:$pre(?<$pname>$regex))$opt";
     } else {
@@ -268,7 +272,7 @@ sub _build_route {
     $is_placeholder = !$is_placeholder;
   }
 
-  return \@route, join('', @regex);
+  return \@route, join('', @regex), \@captures;
 }
 
 
@@ -310,7 +314,7 @@ sub add {
 
   my @methods = $self->_methods($args{methods});
 
-  my ($route, $regex) = $self->_build_route($path, \%args);
+  my ($route, $regex, $captures) = $self->_build_route($path, \%args);
 
   my $index = $self->_group_index($path);
 
@@ -320,6 +324,7 @@ sub add {
     route   => $route,
     index   => $index,
     regex   => $regex,
+    captures => $captures,
     methods => \@methods,
     payload => $payload,
     args    => \%args,
@@ -327,29 +332,43 @@ sub add {
 
   push @{ $table->{routes}[ $index ] ||= [] }, $_;
   $table->{name_index}{ $name } = $_ if defined $name;
-  $table->{regex} = undef; # force recompile
+  $table->{regex} = $table->{static} = undef; # force recompile
 
   return $self;
 }
 
 
+# Sets the table's regex and its static index. A path with no placeholder
+# is looked up in the index instead of the regex, unless an earlier route
+# with a placeholder also matches it: that route is the first match.
 sub _compile {
   my $self = shift;
 
-  my @routes = @{ $self->{table}{routes} };
-  @routes or return qr/(?!)/; # pattern can never match
+  my $table = $self->{table};
+  my @groups = map { $_->[0] } @{ $table->{routes} };
 
   # Tested faster to terminate each route with \z rather than placing
   # at end of combined regex.
   my $regex = join '|',
     map { "(?: $_->{regex} \\z (?{ \$Router::Right::MATCHED = $_->{index} }))" }
-    map { $_->[0] } # unique route paths
-    @routes
+    grep { @{ $_->{route} } > 1 }
+    @groups
   ;
 
-  # warn "Regex: $regex\n";
-  use re 'eval';
-  return qr/\A (?: $regex )/x;
+  {
+    use re 'eval';
+    $regex = length $regex ? qr/\A (?: $regex )/x : qr/(?!)/;
+  }
+
+  my %static;
+  foreach (grep { @{ $_->{route} } == 1 } @groups) {
+    local $MATCHED;
+    next if $_->{path} =~ $regex && $MATCHED < $_->{index};
+    $static{ $_->{path} } = $_->{index};
+  }
+
+  $table->{static} = \%static;
+  return $table->{regex} = $regex;
 }
 
 
@@ -362,18 +381,30 @@ sub match {
   my $method = shift;
 
   my $table = $self->{table};
-  my $regex = $table->{regex} ||= $self->_compile;
+  my $regex = $table->{regex} || $self->_compile;
 
   my $match = $table->{match};
   $$match = undef;
   $table->{error} = undef;
 
-  local $MATCHED;
-  $path =~ /$regex/ or return $self->error(NOT_FOUND);
+  my $routes;
+  my %captured;
+  if (defined(my $index = $table->{static}{ $path })) {
+    $routes = $table->{routes}[ $$match = $index ];
+  } else {
+    local $MATCHED;
+    $path =~ $regex or return $self->error(NOT_FOUND);
 
-  $$match = $MATCHED // croak 'route matched, but no group index was set';
-  my $routes = $table->{routes}[ $$match ]
-    or croak "no route defined for match index '$$match'?!";
+    $$match = $MATCHED // croak 'route matched, but no group index was set';
+    $routes = $table->{routes}[ $$match ]
+      or croak "no route defined for match index '$$match'?!";
+
+    # Read by name: copying %+ walks every name in the combined regex.
+    foreach (@{ $routes->[0]{captures} }) {
+      my $value = $+{ $_ };
+      $captured{ $_ } = $value if defined $value;
+    }
+  }
 
   my $matched_route;
 
@@ -395,9 +426,7 @@ sub match {
 
   # use Data::Dumper; warn Dumper($matched_route), "\n";
 
-  # XXX Most of the time is related to copying the %+ hash; faster way?
-  #return { %{ $matched_route->{payload} } };
-  my $payload = { %{ $matched_route->{payload} }, %+ };
+  my $payload = { %{ $matched_route->{payload} }, %captured };
   my $match_class = $self->_match_class;
 
   $match_class or return $payload; # Raw hash, no blessing
@@ -433,8 +462,12 @@ sub url {
   my $name = shift;
   defined $name && length $name or croak 'no url name supplied';
 
-  my %args;
-  tie %args, 'Tie::IxHash', @_;
+  # A param passed twice keeps its first place and its last value.
+  my (%args, @order);
+  for (my $i = 0; $i < @_; $i += 2) {
+    push @order, $_[ $i ] unless exists $args{ $_[ $i ] };
+    $args{ $_[ $i ] } = $_[ $i + 1 ];
+  }
 
   my @route;
   if (my $route = $self->{table}{name_index}{ $name }) {
@@ -480,7 +513,9 @@ sub url {
   }
 
   my $uri = URI->new(join '', @path);
-  $uri->query_param($_ => $args{$_}) foreach keys %args;
+  if (my @query = map { $_ => $args{ $_ } } grep { exists $args{ $_ } } @order) {
+    $uri->query_form(\@query);
+  }
 
   return $uri;
 }
