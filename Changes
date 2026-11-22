@@ -1,4 +1,4 @@
-1.06 (unreleased)
+2.00 (unreleased)
 
   - resource() builds seven routes, not eleven. The formatted_ twins are
     gone (the {.format} routes beside them always matched first), update

@@ -13,7 +13,7 @@ use Tie::IxHash;
 use URI;
 use URI::QueryParam;
 
-our $VERSION = 1.05;
+our $VERSION = '2.00';
 
 use parent qw/ Exporter /;
 
