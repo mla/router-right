@@ -30,27 +30,6 @@ describe 'undecided' => sub {
     is $match->{format}, 'smith';
   };
 
-  it 'a formatted_ resource route is never the one matched' => sub {
-    $r->resource('user', 'User');
-
-    is $r->match('/users/7.json', 'GET')->name, 'user';
-    is $r->match('/users.json', 'GET')->name, 'users';
-  };
-
-  it 'a resource puts the format before /edit' => sub {
-    $r->resource('user', 'User');
-
-    is $r->url('edit_user', id => 7, format => 'json'), '/users/7.json/edit';
-    ok !$r->match('/users/7/edit.json', 'GET');
-  };
-
-  it 'a resource update takes PUT but not PATCH' => sub {
-    $r->resource('user', 'User');
-
-    ok $r->match('/users/7', 'PUT');
-    ok !$r->match('/users/7', 'PATCH');
-  };
-
   it 'a method refused by the first matching path is a 405, even ' .
      'when a later path takes it' => sub {
     $r->add(show    => 'GET /x/{id}', 'X#show');

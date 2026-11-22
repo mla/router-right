@@ -30,6 +30,7 @@ our $MATCHED;
 
 sub new {
   my $class = shift;
+  my %args  = @_;
 
   $class = ref($class) || $class;
 
@@ -44,6 +45,7 @@ sub new {
     match       => \$match, # route group index of last match
     error       => undef,   # status code of last match
     regex       => undef,   # compiled on first match, dropped by add()
+    legacy_resources => $args{legacy_resources},
   );
 
   return bless {
@@ -590,76 +592,134 @@ sub as_string {
 }
 
 
+# action, route name, methods, path below the collection. In a name, %m is
+# the member and %c the collection.
+my @RESOURCE = (
+  [ index  => '%c',      'GET',       '{.format}' ],
+  [ create => undef,     'POST',      '{.format}' ],
+  [ new    => 'new_%m',  'GET',       '/new{.format}' ],
+  [ show   => '%m',      'GET',       '/{id}{.format}' ],
+  [ update => undef,     'PUT|PATCH', '/{id}{.format}' ],
+  [ delete => undef,     'DELETE',    '/{id}{.format}' ],
+  [ edit   => 'edit_%m', 'GET',       '/{id}/edit{.format}' ],
+);
+
+# What resource() built through 1.05, after Python's Routes.
+my @LEGACY_RESOURCE = (
+  [ index  => '%c',                'GET',    '{.format}' ],
+  [ create => undef,               'POST',   '{.format}' ],
+  [ index  => 'formatted_%c',      'GET',    '.{format}' ],
+  [ new    => 'new_%m',            'GET',    '/new{.format}' ],
+  [ new    => 'formatted_new_%m',  'GET',    '/new.{format}' ],
+  [ show   => '%m',                'GET',    '/{id}{.format}' ],
+  [ update => undef,               'PUT',    '/{id}{.format}' ],
+  [ delete => undef,               'DELETE', '/{id}{.format}' ],
+  [ show   => 'formatted_%m',      'GET',    '/{id}.{format}' ],
+  [ edit   => 'edit_%m',           'GET',    '/{id}{.format}/edit' ],
+  [ edit   => 'formatted_edit_%m', 'GET',    '/{id}.{format}/edit' ],
+);
+
+
+sub _resource_table {
+  my $self = shift;
+
+  return $self->{table}{legacy_resources} ? @LEGACY_RESOURCE : @RESOURCE;
+}
+
+
+# 'POST {op}-hold' => [ 'hold', 'POST', '/{op}-hold' ]; GET when no method
+# is given, so a route cannot change something on a GET by omission.
+sub _resource_extra {
+  my $self = shift;
+  my $spec = shift // '';
+
+  my ($methods, $path) = $spec =~ m{\A\s* (?:(\S+)\s+)? /?(\S+) \s*\z}x
+    or croak "invalid resource route '$spec'";
+
+  (my $action = $path) =~ s/$PLACEHOLDER//g;
+  $action =~ s/\W+/_/g;
+  $action =~ s/^_+|_+$//g;
+  length $action or croak "no action name in resource route '$spec'";
+
+  return [ $action, $methods // 'GET', "/$path" ];
+}
+
+
 sub resource {
   my $self   = shift;
   my $member = shift or croak 'no resource member name supplied';
   my %args   = $self->_args(@_);
 
-  my $collection = delete $args{collection} // PL_N($member);
+  my $extra_collection = delete $args{collection};
+  my $plural = delete $args{plural};
+  if (defined $extra_collection && !ref $extra_collection) {
+    $plural //= $extra_collection;
+    $extra_collection = undef;
+  }
+  $plural //= PL_N($member);
 
-  my $member_name = $member;
-  my $collection_name = $collection;
-  foreach ($member_name, $collection_name) {
-    s/-/_/g;
+  my %name = (m => $member, c => $plural);
+  s/-/_/g foreach values %name;
+
+  my $id = delete $args{id};
+  $id = defined $id ? "{id:$id}" : '{id}';
+
+  my @table = $self->_resource_table;
+  my %known = map { $_->[0] => 1 } @table;
+
+  my $only   = delete $args{only};
+  my $except = delete $args{except};
+  !($only && $except) or croak "resource takes 'only' or 'except', not both";
+  my %listed = map { $_ => 1 } grep { defined }
+    $self->_list($only // $except);
+  foreach (sort keys %listed) {
+    $known{ $_ } or croak "unknown resource action '$_'";
+  }
+  @table = grep { $only ? $listed{ $_->[0] } : !$listed{ $_->[0] } } @table
+    if $only || $except;
+
+  my $actions = delete $args{actions} || {};
+  my @collection = map { $self->_resource_extra($_) }
+    grep { defined } $self->_list($extra_collection);
+  my @member = map { $self->_resource_extra($_) }
+    grep { defined } $self->_list(delete $args{member});
+  $known{ $_->[0] } = 1 foreach @collection, @member;
+  foreach (sort keys %$actions) {
+    $known{ $_ } or croak "unknown resource action '$_'";
   }
 
-  my $undef = undef;
+  my $add = sub {
+    my ($scope, $action, $name, $route) = @_;
+
+    $scope->add(
+      $name => $route,
+      payload => { action => $action },
+      exists $actions->{ $action } ? (payload => $actions->{ $action }) : (),
+    );
+  };
 
   $self->with(delete $args{name}, delete $args{path}, %args, call => sub {
-    $_->add(
-      $collection_name => "GET /$collection\{.format}",
-      { action => 'index' },
-    );
+    my $scope = shift;
 
-    $_->add(
-      $undef => "POST /$collection\{.format}",
-      { action => 'create' },
-    );
+    # Before the table, or /{id} would take a collection route's path.
+    foreach (@collection) {
+      my ($action, $methods, $path) = @$_;
+      $add->($scope, $action, "$name{c}_$action",
+        "$methods /$plural$path");
+    }
 
-    $_->add(
-      "formatted_$collection_name" => "GET /$collection.{format}",
-      { action => 'index' },
-    );
+    foreach (@table) {
+      my ($action, $name, $methods, $path) = @$_;
+      $name =~ s/%([mc])/$name{ $1 }/g if defined $name;
+      $path =~ s/\{id\}/$id/;
+      $add->($scope, $action, $name, "$methods /$plural$path");
+    }
 
-    $_->add(
-      "new_$member_name" => "GET /$collection/new{.format}",
-      { action => 'new' },
-    );
-
-    $_->add(
-      "formatted_new_$member_name" => "GET /$collection/new.{format}",
-      { action => 'new' },
-    );
-
-    $_->add(
-      $member_name => "GET /$collection/{id}{.format}",
-      { action => 'show' },
-    );
-
-    $_->add(
-      $undef => "PUT /$collection/{id}{.format}",
-      { action => 'update' },
-    );
-
-    $_->add(
-      $undef => "DELETE /$collection/{id}{.format}",
-      { action => 'delete' },
-    );
-
-    $_->add(
-      "formatted_$member_name" => "GET /$collection/{id}.{format}",
-      { action => 'show' },
-    );
-
-    $_->add(
-      "edit_$member_name" => "GET /$collection/{id}{.format}/edit",
-      { action => 'edit' },
-    );
-
-    $_->add(
-      "formatted_edit_$member_name" => "GET /$collection/{id}.{format}/edit",
-      { action => 'edit' },
-    );
+    foreach (@member) {
+      my ($action, $methods, $path) = @$_;
+      $add->($scope, $action, "$name{m}_$action",
+        "$methods /$plural/$id$path");
+    }
   });
 
   return $self;
@@ -735,9 +795,9 @@ map web application request URLs to application handlers.
 
 =over 4
 
-=item new()
+=item new([ legacy_resources => 1 ])
 
-Returns a new Router::Right instance
+Returns a new Router::Right instance. See resource() for legacy_resources.
 
 =item add($name => $route_path, \%payload [, %options])
 
@@ -890,23 +950,74 @@ the options.
 
 =item resource($name, \%payload [, %options])
 
-Adds routes to create, read, update, and delete a given resource. For example:
+Adds the routes to list, create, read, update and delete a resource:
 
-  my $r = Router::Right->new->resource('message', { controller => 'Message' });
+  my $r = Router::Right->new->resource('message', 'Message');
   print $r->as_string, "\n";
 
-  # prints:
-  #                 messages GET    /messages{.format}           { action => "index", controller => "Message" }
-  #                          POST   /messages{.format}           { action => "create", controller => "Message" }
-  #       formatted_messages GET    /messages.{format}           { action => "index", controller => "Message" }
-  #              new_message GET    /messages/new{.format}       { action => "new", controller => "Message" }
-  #    formatted_new_message GET    /messages/new.{format}       { action => "new", controller => "Message" }
-  #                  message GET    /messages/{id}{.format}      { action => "show", controller => "Message" }
-  #                          PUT    /messages/{id}{.format}      { action => "update", controller => "Message" }
-  #                          DELETE /messages/{id}{.format}      { action => "delete", controller => "Message" }
-  #        formatted_message GET    /messages/{id}.{format}      { action => "show", controller => "Message" }
-  #             edit_message GET    /messages/{id}{.format}/edit { action => "edit", controller => "Message" }
-  #   formatted_edit_message GET    /messages/{id}.{format}/edit { action => "edit", controller => "Message" }
+  #     messages GET       /messages{.format}           index
+  #              POST      /messages{.format}           create
+  #  new_message GET       /messages/new{.format}       new
+  #      message GET       /messages/{id}{.format}      show
+  #              PATCH,PUT /messages/{id}{.format}      update
+  #              DELETE    /messages/{id}{.format}      delete
+  # edit_message GET       /messages/{id}/edit{.format} edit
+
+Each route's payload is the one supplied plus the action shown. Options:
+
+=over 4
+
+=item only => \@actions, except => \@actions
+
+Build just these actions, or all but these.
+
+=item member => \@routes, collection => \@routes
+
+More routes on one member (/messages/{id}/...) or on the collection
+(/messages/...). Each is the last part of a route path, with the methods
+in front as for add(); a route given no method takes GET only.
+
+  $r->resource(
+    'booking', 'Booking',
+    collection => [ 'dashboard' ],
+    member     => [ 'POST take', 'GET|POST confirm/guest' ],
+  );
+
+  # bookings_dashboard    GET      /bookings/dashboard
+  # booking_take          POST     /bookings/{id}/take
+  # booking_confirm_guest GET,POST /bookings/{id}/confirm/guest
+
+The action is the path with its placeholders dropped and anything that is
+not a word character turned into an underscore; the route is named for the
+member or collection followed by the action. Collection routes are matched
+before /messages/{id}.
+
+=item id => $regex
+
+A pattern the id must match, as in C<{id:\d+}>.
+
+=item actions => { $action => $payload }
+
+Payload merged into one action's routes. A string payload works as it does
+for add(), so C<< new => '#edit' >> sends /messages/new to the edit action.
+
+  $r->resource('tax', 'Tax', actions => { update => { view => 'edit' } });
+
+=item plural => $name
+
+The collection name, when it is not the plural of $name. A string passed
+as C<collection> means the same.
+
+=item name => $name, path => $path, and anything with() accepts
+
+The routes are added in a scope made by with().
+
+=back
+
+A router built with C<< legacy_resources => 1 >> keeps the routes of 1.05
+and earlier, which followed Python's Routes: a formatted_ twin of each
+named route, PUT alone for update, and the format ahead of /edit
+(/messages/{id}{.format}/edit).
 
 =back
 

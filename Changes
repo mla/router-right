@@ -1,5 +1,17 @@
 1.06 (unreleased)
 
+  - resource() builds seven routes, not eleven. The formatted_ twins are
+    gone (the {.format} routes beside them always matched first), update
+    takes PATCH as well as PUT, and an edit path ends in its format
+    (/messages/{id}/edit{.format}, not /messages/{id}{.format}/edit).
+    Router::Right->new(legacy_resources => 1) keeps the old routes.
+
+  - resource() takes only and except to choose its actions; member and
+    collection for further routes ('POST take' adds /bookings/{id}/take
+    as booking_take, GET alone when no method is given); id to constrain
+    the id; actions to add payload to one action; and plural to name the
+    collection. A string passed as collection still names it.
+
   - with() returns a Router::Right, not a Router::Right::Submapper. A
     scope is the router's own class (so a subclass's overrides apply to
     routes added through it) sharing the same routes, with a name prefix,

@@ -303,7 +303,6 @@ describe 'Router' => sub {
       foreach (
         [ DELETE => '/messages' ],
         [ POST   => '/messages/7' ],
-        [ PATCH  => '/messages/7' ],
         [ POST   => '/messages/7/edit' ],
       ) {
         my ($method, $path) = @$_;
@@ -315,7 +314,7 @@ describe 'Router' => sub {
     it 'reports the methods a member path takes' => sub {
       $r->match('/messages/7', 'POST');
 
-      is_deeply [ $r->allowed_methods ], [qw/ DELETE GET PUT /];
+      is_deeply [ $r->allowed_methods ], [qw/ DELETE GET PATCH PUT /];
     };
 
     it 'gives /new to the new action, not to show' => sub {
@@ -328,13 +327,16 @@ describe 'Router' => sub {
       is $r->url('message', id => 7), '/messages/7';
       is $r->url('edit_message', id => 7), '/messages/7/edit';
       is $r->url('message', id => 7, format => 'json'), '/messages/7.json';
-      is $r->url('formatted_message', id => 7, format => 'json'),
-        '/messages/7.json';
     };
 
-    it 'requires a format for a formatted_ url' => sub {
-      eval { $r->url('formatted_messages') };
+    it 'requires a format for a legacy formatted_ url' => sub {
+      my $legacy = $CLASS->new(legacy_resources => 1);
+      $legacy->resource('message', 'Message');
+
+      eval { $legacy->url('formatted_messages') };
       like $@, qr/required param 'format' missing/;
+      is $legacy->url('formatted_message', id => 7, format => 'json'),
+        '/messages/7.json';
     };
 
     it 'pluralizes irregular member names' => sub {
