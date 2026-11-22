@@ -4,6 +4,8 @@
     gone (the {.format} routes beside them always matched first), update
     takes PATCH as well as PUT, and an edit path ends in its format
     (/messages/{id}/edit{.format}, not /messages/{id}{.format}/edit).
+    Every route name starts with the resource: message_new and
+    message_edit, not new_message and edit_message.
     Router::Right->new(legacy_resources => 1) keeps the old routes.
 
   - resource() takes only and except to choose its actions; member and

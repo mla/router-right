@@ -323,9 +323,9 @@ describe 'Router' => sub {
 
     it 'builds each named url' => sub {
       is $r->url('messages'), '/messages';
-      is $r->url('new_message'), '/messages/new';
+      is $r->url('message_new'), '/messages/new';
       is $r->url('message', id => 7), '/messages/7';
-      is $r->url('edit_message', id => 7), '/messages/7/edit';
+      is $r->url('message_edit', id => 7), '/messages/7/edit';
       is $r->url('message', id => 7, format => 'json'), '/messages/7.json';
     };
 
@@ -364,7 +364,7 @@ describe 'Router' => sub {
         trip_id    => 3,
         id         => 9,
       };
-      is $r->url('trip_edit_note', trip_id => 3, id => 9),
+      is $r->url('trip_note_edit', trip_id => 3, id => 9),
         '/trips/3/notes/9/edit';
     };
 

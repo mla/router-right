@@ -597,11 +597,11 @@ sub as_string {
 my @RESOURCE = (
   [ index  => '%c',      'GET',       '{.format}' ],
   [ create => undef,     'POST',      '{.format}' ],
-  [ new    => 'new_%m',  'GET',       '/new{.format}' ],
+  [ new    => '%m_new',  'GET',       '/new{.format}' ],
   [ show   => '%m',      'GET',       '/{id}{.format}' ],
   [ update => undef,     'PUT|PATCH', '/{id}{.format}' ],
   [ delete => undef,     'DELETE',    '/{id}{.format}' ],
-  [ edit   => 'edit_%m', 'GET',       '/{id}/edit{.format}' ],
+  [ edit   => '%m_edit', 'GET',       '/{id}/edit{.format}' ],
 );
 
 # What resource() built through 1.05, after Python's Routes.
@@ -957,11 +957,11 @@ Adds the routes to list, create, read, update and delete a resource:
 
   #     messages GET       /messages{.format}           index
   #              POST      /messages{.format}           create
-  #  new_message GET       /messages/new{.format}       new
+  #  message_new GET       /messages/new{.format}       new
   #      message GET       /messages/{id}{.format}      show
   #              PATCH,PUT /messages/{id}{.format}      update
   #              DELETE    /messages/{id}{.format}      delete
-  # edit_message GET       /messages/{id}/edit{.format} edit
+  # message_edit GET       /messages/{id}/edit{.format} edit
 
 Each route's payload is the one supplied plus the action shown. Options:
 
@@ -1016,8 +1016,8 @@ The routes are added in a scope made by with().
 
 A router built with C<< legacy_resources => 1 >> keeps the routes of 1.05
 and earlier, which followed Python's Routes: a formatted_ twin of each
-named route, PUT alone for update, and the format ahead of /edit
-(/messages/{id}{.format}/edit).
+named route, new_message and edit_message as names, PUT alone for update,
+and the format ahead of /edit (/messages/{id}{.format}/edit).
 
 =back
 

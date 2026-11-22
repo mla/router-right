@@ -107,11 +107,11 @@ a_b_c_formatted_edit_user GET    /a/b/c/users/{id}.{format}/edit { action => "ed
       my $expected = qq{
              messages GET       /messages{.format}           { action => "index" }
                       POST      /messages{.format}           { action => "create" }
-          new_message GET       /messages/new{.format}       { action => "new" }
+          message_new GET       /messages/new{.format}       { action => "new" }
               message GET       /messages/{id}{.format}      { action => "show" }
                       PATCH,PUT /messages/{id}{.format}      { action => "update" }
                       DELETE    /messages/{id}{.format}      { action => "delete" }
-         edit_message GET       /messages/{id}/edit{.format} { action => "edit" }
+         message_edit GET       /messages/{id}/edit{.format} { action => "edit" }
       };
 
       is trimmed($r->as_string), trimmed($expected);
@@ -137,7 +137,7 @@ a_b_c_formatted_edit_user GET    /a/b/c/users/{id}.{format}/edit { action => "ed
       my $expected = q{
         a_b_users GET /a/b/users{.format}
           { action => "index", controller => "A::B::User" }
-        a_b_edit_user GET /a/b/users/{id}/edit{.format}
+        a_b_user_edit GET /a/b/users/{id}/edit{.format}
           { action => "edit", controller => "A::B::User" }
       };
 
@@ -163,7 +163,7 @@ a_b_c_formatted_edit_user GET    /a/b/c/users/{id}.{format}/edit { action => "ed
 
       ok $r->match('/messages/7', 'GET');
       ok !$r->match('/messages/seven', 'GET');
-      is $r->url('edit_message', id => 7), '/messages/7/edit';
+      is $r->url('message_edit', id => 7), '/messages/7/edit';
       eval { $r->url('message', id => 'seven') };
       like $@, qr/invalid value for param 'id'/;
     };
@@ -177,7 +177,7 @@ a_b_c_formatted_edit_user GET    /a/b/c/users/{id}.{format}/edit { action => "ed
     it 'puts the format last on an edit path' => sub {
       $r->resource('message', 'Message');
 
-      is $r->url('edit_message', id => 7, format => 'json'),
+      is $r->url('message_edit', id => 7, format => 'json'),
         '/messages/7/edit.json';
       is $r->match('/messages/7/edit.json', 'GET')->{format}, 'json';
     };
