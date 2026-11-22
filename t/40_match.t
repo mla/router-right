@@ -297,34 +297,90 @@ describe 'Router' => sub {
         is_deeply [ $r->allowed_methods('/foo') ], [qw/ GET PUT /];
       };
 
-    it 'refuse a method the first matching path does not take, though ' .
-       'a later path takes it' => sub {
-      $r->add(remove => 'POST /x/{id}/delete', 'X#delete');
-      $r->add(any    => '/x/{id}/{action}', 'X');
-
-      is $r->match('/x/7/delete', 'POST')->name, 'remove';
-      ok !$r->match('/x/7/delete', 'GET');
-      is $r->error, 405;
-      is_deeply [ $r->allowed_methods ], ['POST'];
-      is $r->match('/x/7/other', 'GET')->{action}, 'other';
-    };
-
-    it 'refuse a method for a literal path a later pattern would take' =>
+    it 'give a path to a later route when the first refuses the method' =>
       sub {
-        $r->add(lit => 'POST /x/special', 'X#special');
-        $r->add(any => '/x/{id}', 'X#show');
+        $r->add(show    => 'GET /x/{id}', 'X#show');
+        $r->add(special => 'POST /x/special', 'X#special');
+        $r->add(update  => 'PUT /x/{id:\d+}', 'X#update');
 
-        ok !$r->match('/x/special', 'GET');
-        is $r->error, 405;
+        is $r->match('/x/special', 'POST')->{action}, 'special';
+        is $r->match('/x/special', 'GET')->{action}, 'show';
+        is_deeply $r->match('/x/7', 'PUT'),
+          { controller => 'X', action => 'update', id => 7 };
+        is $r->match('/x/7', 'PUT')->name, 'update';
+        ok !$r->error;
       };
 
-    it 'treat a path written two ways as two paths' => sub {
-      $r->add(show   => 'GET /x/{id}', 'X#show');
-      $r->add(update => 'PUT /x/{id:\d+}', 'X#update');
+    it 'give a method a restricted route refuses to a wider one after it' =>
+      sub {
+        $r->add(remove => 'POST /x/{id}/delete', 'X#delete');
+        $r->add(any    => '/x/{id}/{action}', 'X');
 
-      ok !$r->match('/x/7', 'PUT');
+        is $r->match('/x/7/delete', 'POST')->name, 'remove';
+        is $r->match('/x/7/delete', 'GET')->name, 'any';
+      };
+
+    it 'report every method the path takes when none of them fits' => sub {
+      $r->add(show    => 'GET /x/{id}', 'X#show');
+      $r->add(special => 'POST /x/special', 'X#special');
+      $r->add(update  => 'PUT /x/{id:\d+}', 'X#update');
+
+      ok !$r->match('/x/special', 'DELETE');
       is $r->error, 405;
+      is_deeply [ $r->allowed_methods ], [qw/ GET POST /];
+
+      ok !$r->match('/x/7', 'DELETE');
+      is_deeply [ $r->allowed_methods ], [qw/ GET PUT /];
+
+      ok $r->match('/x/7', 'GET');
       is_deeply [ $r->allowed_methods ], ['GET'];
+    };
+
+    describe 'with legacy_methods' => sub {
+      before each => sub {
+        $r = $CLASS->new(legacy_methods => 1);
+      };
+
+      it 'refuse a method the first matching path does not take, though ' .
+         'a later path takes it' => sub {
+        $r->add(remove => 'POST /x/{id}/delete', 'X#delete');
+        $r->add(any    => '/x/{id}/{action}', 'X');
+
+        is $r->match('/x/7/delete', 'POST')->name, 'remove';
+        ok !$r->match('/x/7/delete', 'GET');
+        is $r->error, 405;
+        is_deeply [ $r->allowed_methods ], ['POST'];
+        is $r->match('/x/7/other', 'GET')->{action}, 'other';
+      };
+
+      it 'refuse a method for a literal path a later pattern would take' =>
+        sub {
+          $r->add(lit => 'POST /x/special', 'X#special');
+          $r->add(any => '/x/{id}', 'X#show');
+
+          ok !$r->match('/x/special', 'GET');
+          is $r->error, 405;
+        };
+
+      it 'treat a path written two ways as two paths' => sub {
+        $r->add(show   => 'GET /x/{id}', 'X#show');
+        $r->add(update => 'PUT /x/{id:\d+}', 'X#update');
+
+        ok !$r->match('/x/7', 'PUT');
+        is $r->error, 405;
+        is_deeply [ $r->allowed_methods ], ['GET'];
+      };
+
+      it 'share one set of routes with a scope' => sub {
+        $r->with(a => '/a', 'A')->add(b => 'POST /{id}', '#b');
+        $r->add(any => '/a/{rest}', 'Any');
+
+        ok !$r->match('/a/7', 'GET');
+        is $r->match('/a/7', 'post')->{action}, 'b';
+        ok !$r->match('/nope', 'GET');
+        is $r->error, 404;
+        is $r->match('/a/7')->{action}, 'b';
+      };
     };
 
     it 'are matched in any letter case' => sub {
@@ -550,6 +606,59 @@ describe 'Router' => sub {
       ok $other->match('/bar');
       ok !$r->match('/bar');
       ok !$other->match('/foo');
+    };
+
+    describe 'with legacy' => sub {
+      my $routes = sub {
+        my $router = shift;
+        $router->add(remove => 'POST /x/{id}/delete', 'X#delete');
+        $router->add(any    => '/x/{id}/{action}', 'X');
+        $router->resource('message', 'Message');
+        return $router;
+      };
+
+      it 'keeps the methods rule and the resource routes of 1.05' => sub {
+        my $legacy = $routes->($CLASS->new(legacy => 1));
+
+        ok !$legacy->match('/x/7/delete', 'GET');
+        is $legacy->error, 405;
+        is $legacy->url('edit_message', id => 7), '/messages/7/edit';
+        ok $legacy->url('formatted_messages', format => 'json');
+      };
+
+      it 'lets one of the two be turned off' => sub {
+        my $half = $routes->($CLASS->new(legacy => 1, legacy_resources => 0));
+
+        ok !$half->match('/x/7/delete', 'GET');
+        is $half->url('message_edit', id => 7), '/messages/7/edit';
+
+        $half = $routes->($CLASS->new(legacy => 1, legacy_methods => 0));
+
+        is $half->match('/x/7/delete', 'GET')->name, 'any';
+        is $half->url('edit_message', id => 7), '/messages/7/edit';
+      };
+
+      it 'warns of a route that can never match, and keeps it' => sub {
+        my $legacy = $CLASS->new(legacy => 1);
+        $legacy->add(first => 'GET /foo', 'First');
+
+        my @warnings;
+        local $SIG{__WARN__} = sub { push @warnings, @_ };
+        $legacy->add(second => 'GET /foo', 'Second');
+
+        like $warnings[0], qr/route 'second' can never match/;
+        is scalar @warnings, 1;
+        is $legacy->url('second'), '/foo';
+        is $legacy->match('/foo', 'GET')->{controller}, 'First';
+      };
+
+      it 'refuses that route when only the narrower switches are on' => sub {
+        my $narrow = $CLASS->new(legacy_methods => 1, legacy_resources => 1);
+        $narrow->add(first => 'GET /foo', 'First');
+
+        eval { $narrow->add(second => 'GET /foo', 'Second') };
+        like $@, qr/can never match/;
+      };
     };
   };
 };
