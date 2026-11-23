@@ -1056,8 +1056,15 @@ sub resource {
 
   my $extra_collection = delete $args{collection};
   my $plural = delete $args{plural};
+  # A string collection names the plural, as it did in 1.05.
   if (defined $extra_collection && !ref $extra_collection) {
-    $plural //= $extra_collection;
+    !defined $plural or croak "resource '$member' takes a string "
+      . "collection as its plural, and has a plural too; pass collection "
+      . "routes as a list";
+    $extra_collection !~ m{[\s/]} or croak "resource '$member' takes a "
+      . "string collection as its plural, and '$extra_collection' cannot "
+      . "be one; pass collection routes as a list";
+    $plural = $extra_collection;
     $extra_collection = undef;
   }
   $plural //= PL_N($member);
@@ -1451,7 +1458,9 @@ for add(), so C<< new => '#edit' >> sends /messages/new to the edit action.
 =item plural => $name
 
 The collection name, when it is not the plural of $name. A string passed
-as C<collection> means the same.
+as C<collection> means the same, as it did in 1.05; it is refused beside
+C<plural>, or when it holds a space or a slash, since it was then meant
+as a collection route, which goes in a list.
 
 =item name => $name, path => $path, and anything with() accepts
 

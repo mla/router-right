@@ -129,6 +129,18 @@ a_b_c_formatted_edit_user GET    /a/b/c/users/{id}.{format:[^./]+}/edit { action
         'message GET /mailboxes/{id}{.format} { action => "show" }';
     };
 
+    it 'refuses a string collection beside a plural' => sub {
+      eval { $r->resource('person', collection => 'search', plural => 'people') };
+      like $@, qr/resource 'person' takes a string collection as its plural, and has a plural too/;
+    };
+
+    it 'refuses a string collection that cannot be a plural' => sub {
+      foreach my $collection ('POST search', 'a/b') {
+        eval { $r->resource('message', collection => $collection) };
+        like $@, qr/'\Q$collection\E' cannot be one; pass collection routes as a list/;
+      }
+    };
+
     it 'can be nested' => sub {
       $r->with(a => '/a', 'A')
           ->with(b => '/b', '::B')
