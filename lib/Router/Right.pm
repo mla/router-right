@@ -803,6 +803,10 @@ sub match {
     return $match_class->($self, $payload, $matched_route);
   }
 
+  # The default class, without the method call and checks of new().
+  return Router::Right::Match::_make($payload, $matched_route)
+    if $match_class eq 'Router::Right::Match';
+
   return $match_class->new($payload, $matched_route);
 }
 
@@ -1177,6 +1181,13 @@ sub new {
   $routes{ $self } = $route;
 
   return $self;
+}
+
+
+# new() for match(), which has checked what it passes: data, route.
+sub _make {
+  $routes{ $_[0] } = $_[1];
+  return bless $_[0], __PACKAGE__;
 }
 
 
@@ -1555,6 +1566,17 @@ branch tried.
 The matchers are compiled on the first match for each request method. A
 server that forks its workers can call match() once per method before the
 fork, so the workers share them.
+
+A match is the payload hash blessed into Router::Right::Match, which keeps
+the route it came from aside in a field hash, so that the hash holds only
+the payload and the values while its methods can still name the route.
+That costs about a microsecond a match, as much as the matching itself for
+a path with no placeholder. A router that needs only the hash can return
+a false value from C<_match_class> and get it unblessed:
+
+  package My::Router;
+  use parent 'Router::Right';
+  sub _match_class { undef }
 
 =head2 Placeholders that can split the same text
 
