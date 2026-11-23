@@ -98,6 +98,17 @@ describe 'Router url' => sub {
     is $r->url('user', id => "\x{2603}"), '/users/%E2%98%83';
   };
 
+  it 'keeps a byte literal as bytes whatever the values are flagged' => sub {
+    $r->add(cafe => "/caf\xc3\xa9/{x}", 'Cafe');
+    utf8::upgrade(my $flagged = 'abc');
+
+    is $r->url('cafe', x => 'abc'), '/caf%C3%A9/abc';
+    is $r->url('cafe', x => $flagged), '/caf%C3%A9/abc';
+    is $r->url('cafe', x => 'abc', q => $flagged), '/caf%C3%A9/abc?q=abc';
+    is $r->url('cafe', x => 'abc', q => "\x{263a}"),
+      '/caf%C3%A9/abc?q=%E2%98%BA';
+  };
+
   it 'keeps the slashes a spanning placeholder holds' => sub {
     $r->add(file => '/files/{path:.+}', 'File');
 

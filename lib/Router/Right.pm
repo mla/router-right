@@ -781,9 +781,16 @@ sub url {
       or croak "invalid value for param '$pname' in url '$name': '$pval'";
 
     $path .= '.' if $_->{format};
-    $path .= $pval =~ tr{-A-Za-z0-9._~!$&'()*+,;=:@/}{}c
-      ? $self->_escape_path($pval)
-      : $pval;
+    # A value appended as it is goes as bytes: one flagged as utf8, ASCII
+    # or not, would upgrade the path, and URI->new would then escape any
+    # non-ASCII byte in the route's literal text as a character.
+    if ($pval =~ tr{-A-Za-z0-9._~!$&'()*+,;=:@/}{}c) {
+      $path .= $self->_escape_path($pval);
+    } else {
+      $pval = "$pval";
+      utf8::downgrade($pval);
+      $path .= $pval;
+    }
   }
 
   %args or return URI->new($path);
@@ -832,6 +839,7 @@ sub url {
 
   my $query = join $URI::DEFAULT_QUERY_FORM_DELIMITER || '&', @pairs;
   $query =~ s/([^$URI::uric])/URI::Escape::escape_char($1)/ego;
+  utf8::downgrade($query);
 
   return URI->new("$path?$query");
 }
