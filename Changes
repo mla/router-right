@@ -1,5 +1,13 @@
 2.00 (unreleased)
 
+  - add() refuses two placeholders with the default pattern in one path
+    segment (/a/{x}-{y}, /a/{x}{y}): they can divide the segment many
+    ways, and one crafted request of a few thousand characters made a
+    match take seconds. Under legacy => 1 it warns instead. The
+    formatted_ routes of legacy_resources take a format with no dot
+    ({format:[^./]+}) for the same reason; on a 10,000-character path of
+    dots, /users/{id}.{format} took 0.36 s and now takes 0.2 ms.
+
   - match() keeps its cost flat as routes are added. Routes with a
     placeholder are kept in a tree keyed by the whole literal segments
     their paths start with, and a request is tried only against the

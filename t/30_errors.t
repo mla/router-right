@@ -165,6 +165,34 @@ describe 'Router' => sub {
     }
   };
 
+  describe 'two default placeholders in one segment' => sub {
+    foreach my $path ('/a/{x}{y}', '/a/{x}-{y}', '/a/{x}.{y}{.format}',
+                      '/a/{w}/b{x}c{y}d/e') {
+      it "are refused: $path" => sub {
+        eval { $r->add(x => $path, 'X') };
+        like $@, qr/placeholders '\w' and '\w' in route '\Q$path\E' share a segment/;
+      };
+    }
+
+    foreach my $path ('/a/{x}/{y}', '/a/{id}{.format}', '/a/{x}-{y:\d+}',
+                      '/a/{c}{rest:/.*}', '/a/{x:[^/-]+}-{y:[^/-]+}') {
+      it "are not what this refuses: $path" => sub {
+        ok eval { $r->add(x => $path, 'X'); 1 }, $@;
+      };
+    }
+
+    it 'are added with a warning under legacy' => sub {
+      my $legacy = $CLASS->new(legacy => 1);
+      my @warnings;
+      local $SIG{__WARN__} = sub { push @warnings, @_ };
+
+      $legacy->add(x => '/a/{x}-{y}', 'X');
+
+      like $warnings[0], qr/share a segment/;
+      is $legacy->match('/a/b-c')->{y}, 'c';
+    };
+  };
+
   describe 'a route that can never match' => sub {
     it 'is refused when an earlier one takes its path and methods' => sub {
       $r->add(first => 'GET /foo', 'First');

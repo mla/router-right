@@ -254,7 +254,7 @@ describe 'Router' => sub {
     };
 
     it 'with non-special format placeholder' => sub {
-      $r->add(dl => '/dl/{file}{format}', {});
+      $r->add(dl => '/dl/{file:[a-z]+}{format}', {});
       my $url = $r->url('dl', file => 'foo', format => '.mp3');
       is $url, '/dl/foo.mp3';
     };

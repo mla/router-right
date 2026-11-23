@@ -352,6 +352,28 @@ sub add {
 
   my ($route, $regex, $captures, $bare) = $self->_build_route($path);
 
+  # Two placeholders with the default pattern in one segment can divide
+  # it many ways, and a path that nearly matches makes the regex try them
+  # all: a crafted request of a few thousand characters takes seconds.
+  my @sharing;
+  foreach my $part (@$route) {
+    if (!ref $part) {
+      @sharing = () if $part =~ m{/};
+      next;
+    }
+    next if $part->{check};
+    push @sharing, $part->{pname};
+    next if @sharing < 2;
+
+    my $error = "placeholders '$sharing[0]' and '$sharing[1]' in route "
+      . "'$path' share a segment with the default pattern, so a crafted "
+      . "path can make a match slow; give one a pattern that cannot take "
+      . "the other's text, such as {$sharing[1]:[^/-]+}";
+    $table->{legacy} or croak $error;
+    carp $error;
+    last;
+  }
+
   my $index = $self->_group_index($path);
 
   # A second name for a route is fine; a second payload is never reached.
@@ -481,7 +503,10 @@ sub _compile_node {
     my $captures = @$groups <= $CAPTURE_LIMIT;
     my $field = $captures ? 'regex' : 'bare';
     my $regex = join '|',
-      map { '(?: ' . substr($_->{ $field }, $skip) . " \\z (*MARK:$_->{index}))" }
+      map {
+        '(?: ' . substr($_->{ $field }, $skip)
+          . " \\z (*MARK:$_->{index}))"
+      }
       @$groups;
     $node->[5] = $captures;
     $node->[1] = qr/\A \Q$prefix\E (?: $regex )/x;
@@ -909,18 +934,22 @@ my @RESOURCE = (
 );
 
 # What resource() built through 1.05, after Python's Routes.
+# A format with no dot: after {id} and a dot, one that could hold a dot
+# would let the two divide a path many ways.
+my $FORMAT = '{format:[^./]+}';
+
 my @LEGACY_RESOURCE = (
   [ index  => '%c',                'GET',    '{.format}' ],
   [ create => undef,               'POST',   '{.format}' ],
-  [ index  => 'formatted_%c',      'GET',    '.{format}' ],
+  [ index  => 'formatted_%c',      'GET',    ".$FORMAT" ],
   [ new    => 'new_%m',            'GET',    '/new{.format}' ],
-  [ new    => 'formatted_new_%m',  'GET',    '/new.{format}' ],
+  [ new    => 'formatted_new_%m',  'GET',    "/new.$FORMAT" ],
   [ show   => '%m',                'GET',    '/{id}{.format}' ],
   [ update => undef,               'PUT',    '/{id}{.format}' ],
   [ delete => undef,               'DELETE', '/{id}{.format}' ],
-  [ show   => 'formatted_%m',      'GET',    '/{id}.{format}' ],
+  [ show   => 'formatted_%m',      'GET',    "/{id}.$FORMAT" ],
   [ edit   => 'edit_%m',           'GET',    '/{id}{.format}/edit' ],
-  [ edit   => 'formatted_edit_%m', 'GET',    '/{id}.{format}/edit' ],
+  [ edit   => 'formatted_edit_%m', 'GET',    "/{id}.$FORMAT/edit" ],
 );
 
 
@@ -979,7 +1008,7 @@ sub resource {
   }
 
   my @table = $self->_resource_table;
-  @table = grep { $_->[3] !~ /\{format\}/ } @table if !$format;
+  @table = grep { $_->[3] !~ /\{format[:}]/ } @table if !$format;
   my %known = map { $_->[0] => 1 } @table;
 
   my $only   = delete $args{only};
@@ -1457,18 +1486,24 @@ a false value from C<_match_class> and get it unblessed:
 A regex tries every way of dividing a path between placeholders before it
 gives up. When two or more placeholders in one segment can each take the
 text between them, a request that nearly matches costs time in proportion
-to its length raised to the number of such placeholders. These routes
-take seconds for one crafted request of a few thousand characters:
+to its length raised to the number of such placeholders: seconds, for one
+crafted request of a few thousand characters.
 
-  /a/{x}{y}{z}         # three ways to split any run of text
-  /a/{x}-{y}-{z}       # each may hold a '-' as well
+add() refuses the common form of this, two placeholders with the default
+pattern in one segment (C</a/{x}-{y}>, C</a/{x}{y}>), and says how to fix
+it; under C<< legacy => 1 >> it warns and adds the route. Give one of them
+a pattern that cannot take its neighbour's text
+(C</a/{x}-{y:[^/-]+}>), or each a segment of its own.
+
+Patterns of your own are not checked, so the same care applies to them.
+This takes seconds too:
+
   /a/{x:.+}/{y:.+}/{z:.+}/end
 
-Give each placeholder a pattern that cannot take its neighbour's text
-(C</a/{x:[^/-]+}-{y:[^/-]+}>), or one segment of its own. These are safe:
-one default placeholder per segment, C<{id}{.format}>, and a final
-C<{rest:.*}>, which accepts whatever is left. Nested quantifiers inside a
-pattern of your own, such as C<{x:(?:a+)+}>, are a hazard in any regex.
+These are safe: one default placeholder per segment, C<{id}{.format}>, and
+a final C<{rest:.*}>, which accepts whatever is left. Nested quantifiers
+inside a pattern of your own, such as C<{x:(?:a+)+}>, are a hazard in any
+regex.
 
 
 =head1 SEE ALSO

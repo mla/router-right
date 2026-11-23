@@ -41,15 +41,15 @@ describe 'Router' => sub {
       my $expected = qq{
                       messages GET    /messages{.format}           { action => "index" }
                                POST   /messages{.format}           { action => "create" }
-            formatted_messages GET    /messages.{format}           { action => "index" }
+            formatted_messages GET    /messages.{format:[^./]+}           { action => "index" }
                    new_message GET    /messages/new{.format}       { action => "new" }
-         formatted_new_message GET    /messages/new.{format}       { action => "new" }
+         formatted_new_message GET    /messages/new.{format:[^./]+}       { action => "new" }
                        message GET    /messages/{id}{.format}      { action => "show" }
                                PUT    /messages/{id}{.format}      { action => "update" }
                                DELETE /messages/{id}{.format}      { action => "delete" }
-             formatted_message GET    /messages/{id}.{format}      { action => "show" }
+             formatted_message GET    /messages/{id}.{format:[^./]+}      { action => "show" }
                   edit_message GET    /messages/{id}{.format}/edit { action => "edit" }
-        formatted_edit_message GET    /messages/{id}.{format}/edit { action => "edit" }
+        formatted_edit_message GET    /messages/{id}.{format:[^./]+}/edit { action => "edit" }
       };
 
       is trimmed($r->as_string), trimmed($expected);
@@ -61,15 +61,15 @@ describe 'Router' => sub {
       my $expected = q{
                      mailboxes GET    /mailboxes{.format}           { action => "index" }
                                POST   /mailboxes{.format}           { action => "create" }
-           formatted_mailboxes GET    /mailboxes.{format}           { action => "index" }
+           formatted_mailboxes GET    /mailboxes.{format:[^./]+}           { action => "index" }
                    new_message GET    /mailboxes/new{.format}       { action => "new" }
-         formatted_new_message GET    /mailboxes/new.{format}       { action => "new" }
+         formatted_new_message GET    /mailboxes/new.{format:[^./]+}       { action => "new" }
                        message GET    /mailboxes/{id}{.format}      { action => "show" }
                                PUT    /mailboxes/{id}{.format}      { action => "update" }
                                DELETE /mailboxes/{id}{.format}      { action => "delete" }
-             formatted_message GET    /mailboxes/{id}.{format}      { action => "show" }
+             formatted_message GET    /mailboxes/{id}.{format:[^./]+}      { action => "show" }
                   edit_message GET    /mailboxes/{id}{.format}/edit { action => "edit" }
-        formatted_edit_message GET    /mailboxes/{id}.{format}/edit { action => "edit" }
+        formatted_edit_message GET    /mailboxes/{id}.{format:[^./]+}/edit { action => "edit" }
       };
 
       is trimmed($r->as_string), trimmed($expected);
@@ -84,15 +84,15 @@ describe 'Router' => sub {
       my $expected = qq{
                       a_b_c_users GET    /a/b/c/users{.format}           { action => "index", controller => "A::B::C::User" }
                           POST   /a/b/c/users{.format}           { action => "create", controller => "A::B::C::User" }
-    a_b_c_formatted_users GET    /a/b/c/users.{format}           { action => "index", controller => "A::B::C::User" }
+    a_b_c_formatted_users GET    /a/b/c/users.{format:[^./]+}           { action => "index", controller => "A::B::C::User" }
            a_b_c_new_user GET    /a/b/c/users/new{.format}       { action => "new", controller => "A::B::C::User" }
- a_b_c_formatted_new_user GET    /a/b/c/users/new.{format}       { action => "new", controller => "A::B::C::User" }
+ a_b_c_formatted_new_user GET    /a/b/c/users/new.{format:[^./]+}       { action => "new", controller => "A::B::C::User" }
                a_b_c_user GET    /a/b/c/users/{id}{.format}      { action => "show", controller => "A::B::C::User" }
                           PUT    /a/b/c/users/{id}{.format}      { action => "update", controller => "A::B::C::User" }
                           DELETE /a/b/c/users/{id}{.format}      { action => "delete", controller => "A::B::C::User" }
-     a_b_c_formatted_user GET    /a/b/c/users/{id}.{format}      { action => "show", controller => "A::B::C::User" }
+     a_b_c_formatted_user GET    /a/b/c/users/{id}.{format:[^./]+}      { action => "show", controller => "A::B::C::User" }
           a_b_c_edit_user GET    /a/b/c/users/{id}{.format}/edit { action => "edit", controller => "A::B::C::User" }
-a_b_c_formatted_edit_user GET    /a/b/c/users/{id}.{format}/edit { action => "edit", controller => "A::B::C::User" }
+a_b_c_formatted_edit_user GET    /a/b/c/users/{id}.{format:[^./]+}/edit { action => "edit", controller => "A::B::C::User" }
       };
 
       is trimmed($r->as_string), trimmed($expected);
