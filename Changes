@@ -33,7 +33,9 @@
     are no longer copied into the regex of every node below the root.
     Each node's regex holds its own routes, and a request tries its node
     and the nodes above it in the order of their earliest route,
-    stopping once no earlier route is left. Each node matches its shared
+    stopping once no earlier route is left. An ancestor contributes only
+    the routes that could match below it: /messages{.format} at the root
+    is not tried for /t50/7/edit. Each node matches its shared
     literal before the alternation rather than letting Perl build a trie
     on it, which tried alternatives that all matched in quadratic time,
     and a node with more than 32 routes matches without capturing and

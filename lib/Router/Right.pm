@@ -426,11 +426,9 @@ sub add {
 
 # The matcher for one request method, over the paths with a route that
 # takes it: an index of literal paths, and a tree of the others keyed by
-# the whole literal segments they start with. Each node holds a regex over
-# its routes and its ancestors', in the order defined, so the first match
-# in the node a path reaches is the answer, and a request is tried only
-# against routes that could match it. A literal path is looked up in the
-# index instead, unless an earlier route with a placeholder matches it.
+# the whole literal segments they start with (see _compile_node). A literal
+# path is looked up in the index instead, unless an earlier route with a
+# placeholder matches it.
 #
 # $method is '' for every path whatever its methods, and '*' for a method
 # no route names, which only routes taking every method answer.
@@ -460,7 +458,7 @@ sub _compile {
         foreach _segments($group->{route}[0]);
       push @{ $node->[2] }, $group;
     }
-    _compile_node($root, []);
+    _compile_node($root, [], {});
 
     my %static;
     foreach (grep { @{ $_->{route} } == 1 } @groups) {
@@ -491,46 +489,81 @@ sub _segments {
 
 # A node's regex is over its own routes only, in the order defined, so its
 # first match is the earliest of them to match. A route an ancestor holds
-# is not repeated below it: the chain, the node and its ancestors that hold
-# routes, ordered by the earliest route each holds, is searched instead.
+# is not repeated below it: the chain, the node and the parts of its
+# ancestors that could match below it, ordered by the earliest route each
+# holds, is searched instead.
+#
+# A node, and each part in a chain: [ child by segment, regex, groups,
+# chain, earliest index, captures, fast ], the last three set with the regex
+# and the chain and fast only on a node.
 sub _compile_node {
-  my ($node, $ancestors) = @_;
+  my ($node, $inherited, $parts) = @_;
 
-  my $groups = $node->[2];
+  _compile_part($node) if @{ $node->[2] };
 
-  if (@$groups) {
-    # The literal every route here starts with is matched once, ahead of
-    # the alternation. Left in it, Perl would build a trie on it, and a trie
-    # whose words all match tries them in quadratic time.
-    my $prefix = $groups->[0]{route}[0];
-    foreach (@$groups) {
-      chop $prefix while index($_->{route}[0], $prefix) != 0;
-    }
-    my $skip = length quotemeta $prefix;
+  my @chain = sort { $a->[4] <=> $b->[4] }
+    @$inherited, @{ $node->[2] } ? $node : ();
+  $node->[3] = \@chain;
 
-    # Tested faster to terminate each route with \z rather than placing
-    # at end of combined regex.
-    my $captures = @$groups <= $CAPTURE_LIMIT;
-    my $field = $captures ? 'regex' : 'bare';
-    my $regex = join '|',
-      map {
-        '(?: ' . substr($_->{ $field }, $skip)
-          . " \\z (*MARK:$_->{index}))"
-      }
-      @$groups;
-    $node->[5] = $captures;
-    $node->[1] = qr/\A \Q$prefix\E (?: $regex )/x;
-    $node->[4] = $groups->[0]{index};
+  # The usual case, which match() takes without the chain: the node comes
+  # alone in it, and captures its values.
+  $node->[6] = @chain == 1 && $chain[0] == $node && $node->[5];
+
+  while (my ($segment, $child) = each %{ $node->[0] }) {
+    my @below = @$inherited;
+    push @below, _part_below($node, $segment, $parts) if @{ $node->[2] };
+    _compile_node($child, \@below, $parts);
   }
+}
 
-  my @holding = grep { @{ $_->[2] } } @$ancestors, $node;
-  $node->[3] = [ sort { $a->[4] <=> $b->[4] } @holding ];
 
-  # The usual case, which match() takes without the chain: the node is the
-  # only one holding routes for its paths, and captures their values.
-  $node->[6] = @holding == 1 && $holding[0] == $node && $node->[5];
+# The part of a node's routes that could match a path continuing below it
+# through $segment. A route whose last segment starts with a literal
+# (/messages{.format} at the root) needs the path's segment to start with
+# it; the rest, such as a catch-all, could match anything below.
+sub _part_below {
+  my ($node, $segment, $parts) = @_;
 
-  _compile_node($_, \@holding) foreach values %{ $node->[0] };
+  my @groups = grep {
+    my ($partial) = $_->{route}[0] =~ m{([^/]*)\z};
+    !length $partial || index($segment, $partial) == 0;
+  } @{ $node->[2] };
+
+  return $node if @groups == @{ $node->[2] };
+  return if !@groups;
+
+  return $parts->{ join ',', map { $_->{index} } @groups } ||=
+    _compile_part([ undef, undef, \@groups ]);
+}
+
+
+sub _compile_part {
+  my $part = shift;
+
+  my $groups = $part->[2];
+
+  # The literal every route here starts with is matched once, ahead of the
+  # alternation. Left in it, Perl would build a trie on it, and a trie
+  # whose words all match tries them in quadratic time.
+  my $prefix = $groups->[0]{route}[0];
+  foreach (@$groups) {
+    chop $prefix while index($_->{route}[0], $prefix) != 0;
+  }
+  my $skip = length quotemeta $prefix;
+
+  my $captures = @$groups <= $CAPTURE_LIMIT;
+  my $field = $captures ? 'regex' : 'bare';
+  my $regex = join '|',
+    map {
+      '(?: ' . substr($_->{ $field }, $skip)
+        . " \\z (*MARK:$_->{index}))"
+    }
+    @$groups;
+
+  @$part[ 1, 4, 5 ] =
+    (qr/\A \Q$prefix\E (?: $regex )/x, $groups->[0]{index}, $captures);
+
+  return $part;
 }
 
 
