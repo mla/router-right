@@ -181,6 +181,30 @@ describe 'Router' => sub {
       };
     }
 
+    foreach (
+      [ '/a/{x}-{y}',        qr/such as \{y:\[\^\/-\]\+\}/ ],
+      [ '/a/{x}.{y}',        qr/such as \{y:\[\^\/\.\]\+\}/ ],
+      [ '/a/{x}{y}',         qr/or put them in segments of their own/ ],
+      [ '/a/{x}-{n:\d+}]{y}', qr/such as \{y:\[\^\/\\\]\]\+\}/ ],
+    ) {
+      my ($path, $suggestion) = @$_;
+      it "suggest a fix that fits: $path" => sub {
+        eval { $r->add(x => $path, 'X') };
+        like $@, $suggestion;
+      };
+    }
+
+    it 'suggest a pattern that makes the route linear' => sub {
+      foreach my $route ('/a/{x}-{y:[^/-]+}', '/a/{x}.{y:[^/.]+}') {
+        my $t = $CLASS->new;
+        $t->add(x => $route, 'X');
+        (my $sep = $route) =~ s/.*\}(.)\{.*/$1/;
+        my $start = time;
+        $t->match('/a/' . ("a$sep" x 20_000) . '/');
+        cmp_ok time - $start, '<', 2, $route;
+      }
+    };
+
     it 'are added with a warning under legacy' => sub {
       my $legacy = $CLASS->new(legacy => 1);
       my @warnings;

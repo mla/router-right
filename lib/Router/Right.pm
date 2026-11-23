@@ -365,20 +365,30 @@ sub add {
   # Two placeholders with the default pattern in one segment can divide
   # it many ways, and a path that nearly matches makes the regex try them
   # all: a crafted request of a few thousand characters takes seconds.
-  my @sharing;
+  my (@sharing, $before);
   foreach my $part (@$route) {
     if (!ref $part) {
       @sharing = () if $part =~ m{/};
+      ($before) = $part =~ m{([^/]*)\z};
       next;
     }
+    my $separator = $before;
+    $before = '';
     next if $part->{check};
     push @sharing, $part->{pname};
     next if @sharing < 2;
 
+    # The text just before the second is what it must not take.
+    my $fix = length $separator
+      ? do {
+          (my $char = substr $separator, -1) =~ s/([\]\\])/\\$1/;
+          "such as {$sharing[1]:[^/$char]+}";
+        }
+      : 'or put them in segments of their own';
     my $error = "placeholders '$sharing[0]' and '$sharing[1]' in route "
       . "'$path' share a segment with the default pattern, so a crafted "
       . "path can make a match slow; give one a pattern that cannot take "
-      . "the other's text, such as {$sharing[1]:[^/-]+}";
+      . "the other's text, $fix";
     $table->{legacy} or croak $error;
     carp $error;
     last;
