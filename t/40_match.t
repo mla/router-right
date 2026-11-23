@@ -252,6 +252,49 @@ describe 'Router' => sub {
     };
   };
 
+  describe 'route tree' => sub {
+    it 'gives a path to an earlier route that starts with a placeholder' => sub {
+      $r->add(any => '/{x:.*}', 'A#any');
+      $r->add(b   => '/b/{id}', 'B#b');
+
+      is $r->match('/b/7')->{action}, 'any';
+    };
+
+    it 'keeps the earliest match across nodes' => sub {
+      $r->add(r0    => '/{y:zz}', 'R#r0');
+      $r->add(c1    => '/c/{id:\d+x}', 'C#c1');
+      $r->add(early => '/{x:c/.*}', 'C#early');
+      $r->add(late  => '/c/{id}', 'C#late');
+
+      is $r->match('/c/7')->{action}, 'early';
+      is $r->match('/c/7x')->{action}, 'c1';
+    };
+
+    it 'reads the values of a node too large to capture' => sub {
+      no warnings 'once';
+      local $Router::Right::CAPTURE_LIMIT = 1;
+      $r->add(p => '/p/{id}', 'P#p');
+      $r->add(q => '/p/{id}/q', 'P#q');
+
+      is_deeply $r->match('/p/5'), { controller => 'P', action => 'p', id => 5 };
+      is_deeply $r->match('/p/5/q'), { controller => 'P', action => 'q', id => 5 };
+    };
+
+    it 'tries a route whose last segment starts with a literal where it fits' => sub {
+      $r->resource('message', 'Message');
+      $r->add(ab  => '/ab{rest:.*}', 'Ab');
+      $r->add(abz => '/abz/{id}', 'Abz');
+      $r->add(x   => '/x/{id}', 'X');
+      $r->add(any => '/{splat:.*}', 'Any');
+
+      is $r->match('/abz/7')->{controller}, 'Ab';
+      is $r->match('/x/7')->{controller}, 'X';
+      is $r->match('/messages.json')->{action}, 'index';
+      is $r->match('/messages/7/edit')->{action}, 'edit';
+      is $r->match('/y/7')->{controller}, 'Any';
+    };
+  };
+
   describe 'format placeholder' => sub {
     before each => sub {
       $r->add(dl => '/dl/{file}{.format}', 'Download');
