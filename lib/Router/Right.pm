@@ -245,8 +245,9 @@ sub _build_route {
       croak "placeholder '$pname' redefined" if $placeholders{ $pname }++;
 
       # url() tests the default pattern without a regex, which is slower.
-      # A pattern of one's own keeps its own flags: (?^:...) stops the
-      # combined regex's /x dropping a space or reading # as a comment.
+      # A pattern of one's own keeps its spaces and #: (?-x:...) stops the
+      # combined regex's /x dropping one or reading the other as a comment.
+      # Not (?^:...), which needs Perl 5.14.
       my $check;
       if (length $regex) {
         eval { qr/\A(?:$regex)\z/ }
@@ -255,7 +256,7 @@ sub _build_route {
           . "'$pname' refers to a group (\\1, \\g, \\k, (?1), (?&name), "
           . "(?R) or a condition on one); groups are numbered across all "
           . "routes, so write it without";
-        $regex = "(?^:$regex)";
+        $regex = "(?-x:$regex)";
         $check = qr/\A$regex\z/;
       } else {
         $regex = '[^/]+?';
