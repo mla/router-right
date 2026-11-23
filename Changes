@@ -23,8 +23,11 @@
     (\1, \g{-1}, \k<name>, (?1), (?&name), (?R), (?(1)...)). Perl read
     the reference against the regex of every route matched together, so
     /{x:([a-c])\1} never matched, and (?&q) could reach another route's
-    group named q. A space or # in a pattern is now literal; before, the
-    combined regex's /x dropped the space and took # as a comment.
+    group named q. It also refuses a backtracking verb ((*ACCEPT),
+    (*COMMIT), (*SKIP) and the rest): (*ACCEPT) ended the match before
+    the route was recorded, and 2.00 croaked on such a request. A space
+    or # in a pattern is now literal; before, the combined regex's /x
+    dropped the space and took # as a comment.
 
   - Routes that start with a placeholder (/{lang}/about, a catch-all)
     are no longer copied into the regex of every node below the root.

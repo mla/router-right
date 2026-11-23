@@ -193,6 +193,40 @@ describe 'Router' => sub {
     };
   };
 
+  describe 'a placeholder pattern with a backtracking verb' => sub {
+    foreach my $pattern (
+      '[a-z]+(*ACCEPT)', 'a(*COMMIT)b', 'a(*PRUNE)b', 'a(*SKIP)b',
+      'a(*FAIL)|b', 'a(*F)|b', 'a(*MARK:x)b', 'a(*:x)b', 'a(*THEN)b|c',
+      'a(*PRUNE:x)b',
+    ) {
+      it "is refused: $pattern" => sub {
+        eval { $r->add(x => "/x/{p:$pattern}", 'X') };
+        like $@, qr/pattern for placeholder 'p' uses a backtracking verb/;
+      };
+    }
+
+    foreach my $pattern ('\\(*ACCEPT\\)', '[(*]ACCEPT', 'a\\(\\*COMMIT') {
+      it "is not refused for what only looks like one: $pattern" => sub {
+        ok eval { $r->add(x => "/x/{p:$pattern}", 'X'); 1 }, $@;
+      };
+    }
+
+    it 'is not refused for a lower-case assertion' => sub {
+      plan skip_all => 'needs Perl 5.28' if $] < 5.028;
+      ok eval { $r->add(x => '/x/{p:(*pla:a)[a-z]+}', 'X'); 1 }, $@;
+      ok $r->match('/x/ab');
+      ok !$r->match('/x/ba');
+    };
+
+    it 'cannot send a request to another route' => sub {
+      $r->add(home  => '/', 'Home');
+      $r->add(purge => 'POST /admin/{id}/purge', 'Admin#purge');
+      eval { $r->add(s => '/s/{x:[a-z]+(*ACCEPT)}', 'S') };
+
+      ok !$r->match('/s/abc', 'POST');
+    };
+  };
+
   describe 'a route that can never match' => sub {
     it 'is refused when an earlier one takes its path and methods' => sub {
       $r->add(first => 'GET /foo', 'First');

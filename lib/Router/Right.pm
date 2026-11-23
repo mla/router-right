@@ -252,10 +252,14 @@ sub _build_route {
       if (length $regex) {
         eval { qr/\A(?:$regex)\z/ }
           or croak "invalid pattern for placeholder '$pname': $@";
-        _refers_to_group($regex) and croak "pattern for placeholder "
-          . "'$pname' refers to a group (\\1, \\g, \\k, (?1), (?&name), "
-          . "(?R) or a condition on one); groups are numbered across all "
-          . "routes, so write it without";
+        my $reach = _reaches_outside($regex) // '';
+        $reach ne 'group' or croak "pattern for placeholder '$pname' "
+          . "refers to a group (\\1, \\g, \\k, (?1), (?&name), (?R) or a "
+          . "condition on one); groups are numbered across all routes, so "
+          . "write it without";
+        $reach ne 'verb' or croak "pattern for placeholder '$pname' "
+          . "uses a backtracking verb such as (*ACCEPT) or (*COMMIT), which "
+          . "acts on the match of every route; write it without";
         $regex = "(?-x:$regex)";
         $check = qr/\A$regex\z/;
       } else {
@@ -288,26 +292,31 @@ sub _build_route {
 }
 
 
-# Whether a pattern refers to one of its groups: a back-reference,
-# recursion, or a condition on a group. Perl would resolve it against the
-# combined regex, where the groups are numbered after every other route's
-# and a name may be another route's. Escapes and character classes are
-# skipped, so \\1 and [\1] are not references.
+# What in a pattern would act beyond it in the combined regex of all
+# routes, or undef. A reference to a group ('group') resolves against every
+# route's groups, numbered after theirs, and a name may be another route's.
+# A backtracking verb ('verb') acts on the whole match: (*ACCEPT) ends it
+# before the route is recorded, and (*COMMIT) stops later routes being
+# tried. The lower-case (*pla:...), (*atomic:...) and the like are not
+# verbs. Escapes and character classes are skipped, so \\1 and [\1] are
+# not references.
+my $VERB = qr{ \( \* (?: [A-Z] | : ) }x;
 my $REFERENCE = qr{
     \\ [1-9gk]                       # \1, \g1, \g{-1}, \g{name}, \k<name>
   | \( \? (?: [-+]?\d | R\) | & | P[=>] )  # (?1), (?-1), (?R), (?&n), (?P=n)
   | \( \? \( (?! \? )                 # (?(1)...), (?(<n>)...), (?(R)...)
 }x;
 
-sub _refers_to_group {
+sub _reaches_outside {
   my $pattern = shift;
 
   my $skip = qr{ \\. | \[ \^? \]? (?: \\. | [^\]] )* \] | . }xs;
-  while ($pattern =~ /\G (?: ($REFERENCE) | $skip )/gcx) {
-    return 1 if defined $1;
+  while ($pattern =~ /\G (?: ($REFERENCE) | ($VERB) | $skip )/gcx) {
+    return 'group' if defined $1;
+    return 'verb'  if defined $2;
   }
 
-  return 0;
+  return;
 }
 
 
@@ -1434,8 +1443,11 @@ C<\g{-1}>, C<\k<name>>), recursion (C<(?1)>, C<(?&name)>, C<(?R)>) or
 conditions on a group (C<(?(1)...)>). The patterns of all routes are
 matched as one regex, where a group's number counts every route's groups
 and a name may be another route's, so such a pattern is refused when the
-route is added. Named captures, lookarounds and conditions on them are
-fine, and spaces and C<#> in a pattern are literal.
+route is added. So is a backtracking verb (C<(*ACCEPT)>, C<(*COMMIT)>,
+C<(*SKIP)> and the rest), which would act on the match of every route.
+Named captures, lookarounds (including C<(*pla:...)> and the other
+lower-case forms) and conditions on them are fine, and spaces and C<#> in
+a pattern are literal.
 
 The special {.format} placeholder can be used to allow an optional file extension to be appended. For example:
 
