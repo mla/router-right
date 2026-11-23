@@ -71,7 +71,7 @@ sub _list {
 }
 
 
-# mainly for testing right now
+# Used by tests.
 sub _route {
   my $self = shift;
   my $name = shift // croak 'no name supplied';
@@ -159,7 +159,7 @@ sub _args {
 
 
 # Given a route path, splits off the allowed methods prefix, if any.
-# See ROUTE DEFINTION in the POD.
+# See add() in the POD.
 sub _split_route_path {
   my $self = shift;
   my $path = shift or return;
@@ -244,7 +244,7 @@ sub _build_route {
 
       croak "placeholder '$pname' redefined" if $placeholders{ $pname }++;
 
-      # url() tests the default pattern without a regex, which is slower.
+      # No check for the default pattern: url() tests it without a regex.
       # A pattern of one's own keeps its spaces and #: (?-x:...) stops the
       # combined regex's /x dropping one or reading the other as a comment.
       # Not (?^:...), which needs Perl 5.14.
@@ -283,8 +283,7 @@ sub _build_route {
     $is_placeholder = !$is_placeholder;
   }
 
-  # The regex without the placeholders' own captures, for the combined
-  # regex: a capture in each of many alternatives slows every branch.
+  # $bare: see $CAPTURE_LIMIT.
   my $regex = join '', @regex;
   my $bare = join '', @bare;
 
@@ -364,7 +363,7 @@ sub add {
 
   # Two placeholders with the default pattern in one segment can divide
   # it many ways, and a path that nearly matches makes the regex try them
-  # all: a crafted request of a few thousand characters takes seconds.
+  # all.
   my (@sharing, $before);
   foreach my $part (@$route) {
     if (!ref $part) {
@@ -1029,9 +1028,8 @@ sub _resource_table {
 
 
 # A member or collection route as a row of the resource table:
-# 'POST {op}-hold' => [ 'hold', '%m_hold', 'POST', '/{op}-hold' ]. GET when
-# no method is given, so a route cannot change something on a GET by
-# omission.
+# 'POST {op}-hold' => [ 'hold', '%m_hold', 'POST', '/{op}-hold' ]. GET
+# alone when no method is given, not every method.
 sub _resource_extra {
   my $self = shift;
   my $on   = shift;
@@ -1299,7 +1297,7 @@ METHOD_NOT_ALLOWED functions.
 Returns the list of allowed methods for a given route name or path. In list context, returns a list. In scalar context, returns an array reference. An empty list/array indicates that all methods are
 permitted.
 
-If route $name is supplied, returns its permitted methods. Returns undef in scalar context if the route is unknown. If $name contains a forward slash, it's intepreted as a route path, instead.
+If route $name is supplied, returns its permitted methods. Returns undef in scalar context if the route is unknown. If $name contains a forward slash, it's interpreted as a route path, instead.
 
 With no argument, returns the methods permitted by the last match()
 attempt: those of the matched path, or after a 405 those of every route
@@ -1335,9 +1333,9 @@ the order they were added. Treat them as read-only.
 
 =item as_string()
 
-Returns a report of the defined routes, in order of definition.
+Returns a report of the defined routes, grouped by path as routes() returns them.
 
-=item with($name => $route_path [, %options]
+=item with($name => $route_path [, \%payload] [, %options])
 
 Returns a scope: a router of the same class that adds to the same routes,
 with $name, $route_path and the options applied to everything added through
@@ -1537,11 +1535,13 @@ hundred routes or a hundred thousand.
 
 Routes that start with a placeholder, such as C</{lang}/about> or a
 catch-all C</{path:.*}>, sit at the root, and a node's regex holds its own
-routes only. A request is tried against its node first and against the
-root only if a root route was defined earlier than the routes it matched,
-or it matched none; a catch-all defined last costs nothing until then.
-Defined first, the root's routes are tried on every request: three
-hundred of them add about six microseconds. A node with more than 32
+routes only. A request tries its node and the nodes above it in the order
+of the earliest route each holds, stopping once no node left has an
+earlier route than its match; a catch-all defined last costs nothing
+until nothing else matches. From a node above it, a request is tried only
+against routes that could match below: C</messages{.format}> is not tried
+for C</t50/7>. Defined first, the root's routes are tried on every
+request: three hundred of them add about six microseconds. A node with more than 32
 routes matches without capturing, then takes the values from the matched
 route's own regex, because captures in a long alternation slow every
 branch tried.
