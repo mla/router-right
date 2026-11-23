@@ -144,6 +144,27 @@ describe 'Router' => sub {
     };
   };
 
+  describe 'a placeholder pattern that refers to a group' => sub {
+    foreach my $pattern (
+      '([a-c])\1', '([a-c])\g1', '([a-c])\g{-1}', '(?<q>a)\k<q>',
+      "(?<q>a)\\k'q'", '(?<q>a)\g{q}', '(?P<q>a)(?P=q)', '(a)(?1)',
+      '(a)(?-1)', '(?+1)(a)', '\((?:[^()]|(?R))*\)', '(?<q>a)(?&q)',
+      '(?<q>a)(?P>q)', '(a)?(?(1)b|c)', '(?<q>a)?(?(<q>)b|c)',
+      '(?(DEFINE)(?<d>a))(?&d)', '(a)(?(R1)b|c)', '(a)(?0)',
+    ) {
+      it "is refused: $pattern" => sub {
+        eval { $r->add(x => "/x/{p:$pattern}", 'X') };
+        like $@, qr/pattern for placeholder 'p' refers to a group/;
+      };
+    }
+
+    foreach my $pattern ('a\\\\1', '[\1a]', '(?(?=a)ab|c)', '(?<q>a)b', '(?:a)(b)') {
+      it "is not refused for what only looks like one: $pattern" => sub {
+        ok eval { $r->add(x => "/x/{p:$pattern}", 'X'); 1 }, $@;
+      };
+    }
+  };
+
   describe 'a route that can never match' => sub {
     it 'is refused when an earlier one takes its path and methods' => sub {
       $r->add(first => 'GET /foo', 'First');

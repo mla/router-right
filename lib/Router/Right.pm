@@ -245,12 +245,17 @@ sub _build_route {
       croak "placeholder '$pname' redefined" if $placeholders{ $pname }++;
 
       # url() tests the default pattern without a regex, which is slower.
-      # A pattern of one's own is read as on its own: see _own_references.
+      # A pattern of one's own keeps its own flags: (?^:...) stops the
+      # combined regex's /x dropping a space or reading # as a comment.
       my $check;
       if (length $regex) {
         eval { qr/\A(?:$regex)\z/ }
           or croak "invalid pattern for placeholder '$pname': $@";
-        $regex = '(?^:' . $class->_own_references($regex) . ')';
+        _refers_to_group($regex) and croak "pattern for placeholder "
+          . "'$pname' refers to a group (\\1, \\g, \\k, (?1), (?&name), "
+          . "(?R) or a condition on one); groups are numbered across all "
+          . "routes, so write it without";
+        $regex = "(?^:$regex)";
         $check = qr/\A$regex\z/;
       } else {
         $regex = '[^/]+?';
@@ -259,9 +264,7 @@ sub _build_route {
       $_ = { pname => $pname, check => $check, format => $format };
 
       # A pattern may name captures of its own; match() returns those too.
-      # The names _own_references gives are not among them.
-      push @captures, $pname,
-        grep { !/\A_rr\d+\z/ } $regex =~ /\(\?P?[<']([A-Za-z_]\w*)[>']/g;
+      push @captures, $pname, $regex =~ /\(\?P?[<']([A-Za-z_]\w*)[>']/g;
 
       push @regex, $format
         ? "(?:\\.(?<$pname>$regex))?"
@@ -284,153 +287,26 @@ sub _build_route {
 }
 
 
-# A placeholder's pattern rewritten so that it means what it means on its
-# own wherever it sits, as one alternative among many routes. Perl resolves
-# a reference against the whole regex: a number (\1, (?1), (?(1)...), and
-# relative ones too) counts every group before it, and recursion by name,
-# (?&name), goes to the first group of that name, which may be another
-# route's. So each reference is pointed instead at a group of a name used
-# nowhere else, placed just inside the groups it means: one inside each
-# group of that number or name, or around the whole pattern for (?R). The
-# pattern's own groups keep their names and numbers.
-#
-# A pattern refers only to its own groups: add() compiles each alone, and
-# Perl refuses a reference to a group it does not hold.
-my $GROUP_NAME = 0;
+# Whether a pattern refers to one of its groups: a back-reference,
+# recursion, or a condition on a group. Perl would resolve it against the
+# combined regex, where the groups are numbered after every other route's
+# and a name may be another route's. Escapes and character classes are
+# skipped, so \\1 and [\1] are not references.
+my $REFERENCE = qr{
+    \\ [1-9gk]                       # \1, \g1, \g{-1}, \g{name}, \k<name>
+  | \( \? (?: [-+]?\d | R\) | & | P[=>] )  # (?1), (?-1), (?R), (?&n), (?P=n)
+  | \( \? \( (?! \? )                 # (?(1)...), (?(<n>)...), (?(R)...)
+}x;
 
-sub _own_references {
-  my $class   = shift;
+sub _refers_to_group {
   my $pattern = shift;
 
-  my $NAME = qr/[A-Za-z_]\w*/;
-
-  my (@groups, @refs, @open);
-  my ($count, $at) = (0, 0);
-  while ($at < length $pattern) {
-    pos($pattern) = $at;
-    my @ref;    # kind, then 'number' and a number or 'name' and a name
-
-    # References.
-    if ($pattern =~ /\G\\(?:g\{?|)([1-9]\d*)\}?/gc
-      && ($1 <= 9 || substr($pattern, $at, 2) eq '\\g')) {
-      @ref = (back => number => $1);
-    } elsif (pos($pattern) = $at, $pattern =~ /\G\\([1-9]\d*)/gc) {
-      # \10 and above: a reference if there are that many groups, which is
-      # not known until the end, else an octal escape.
-      @ref = (back => late => $1);
-    } elsif (pos($pattern) = $at, $pattern =~ /\G\\g\{?-([1-9]\d*)\}?/gc) {
-      @ref = (back => number => $count - $1 + 1);
-    } elsif ($pattern =~ /\G\\(?:k<($NAME)>|k'($NAME)'|k\{($NAME)\}|g\{($NAME)\})/gc
-      || $pattern =~ /\G\(\?P=($NAME)\)/gc) {
-      @ref = (back => name => $+);
-    } elsif ($pattern =~ /\G\(\?([1-9]\d*)\)/gc) {
-      @ref = (recurse => number => $1);
-    } elsif ($pattern =~ /\G\(\?([-+])([1-9]\d*)\)/gc) {
-      @ref = (recurse => number => $1 eq '-' ? $count - $2 + 1 : $count + $2);
-    } elsif ($pattern =~ /\G\(\?(?:&|P>)($NAME)\)/gc) {
-      @ref = (recurse => name => $1);
-    } elsif ($pattern =~ /\G\(\?(?:R|0)\)/gc) {
-      @ref = (recurse => whole => '');
-    } elsif ($pattern =~ /\G\(\?\(R([1-9]\d*)\)/gc) {
-      # Whether the match is inside recursion into the group.
-      @ref = (recursing => number => $1);
-      push @open, {};
-    } elsif ($pattern =~ /\G\(\?\(R&($NAME)\)/gc) {
-      @ref = (recursing => name => $1);
-      push @open, {};
-    } elsif ($pattern =~ /\G\(\?\((?:DEFINE|R)\)/gc) {
-      # Opens a group, but its (DEFINE) or (R) is not one. (?(R)...) asks
-      # about any recursion, and recursion here is only ever the pattern's.
-      push @open, {};
-    } elsif ($pattern =~ /\G\(\?\(([1-9]\d*)\)/gc) {
-      @ref = (condition => number => $1);
-      push @open, {};
-    } elsif ($pattern =~ /\G\(\?\((?:<($NAME)>|'($NAME)')\)/gc) {
-      @ref = (condition => name => $+);
-      push @open, {};
-    }
-
-    # Everything else that matters: what opens and closes a group.
-    elsif ($pattern =~ /\G\\./gcs) {
-      # Another escape
-    } elsif ($pattern =~ /\G\[\^?\]?(?:\[:\^?\w+:\]|\\.|[^\]])*\]/gcs) {
-      # A character class
-    } elsif ($pattern =~ /\G\(\?\#[^)]*\)/gc
-      || $pattern =~ /\G\(\*[^)]*\)/gc
-      || $pattern =~ /\G\(\?[\^\w-]*\)/gc) {
-      # A comment, a verb, flags: nothing opened
-    } elsif ($pattern =~ /\G\(\?\|/gc) {
-      push @open, { reset => $count, most => $count };
-    } elsif ($pattern =~ /\G\(\?(?:P?<(?![=!])|')($NAME)[>']/gc
-      || $pattern =~ /\G\((?![?*])/gc) {
-      my $group = { number => ++$count, name => $1, end_open => pos $pattern };
-      push @groups, $group;
-      push @open, { group => $group };
-    } elsif ($pattern =~ /\G\(/gc) {
-      push @open, {};
-    } elsif ($pattern =~ /\G\|/gc) {
-      # A branch reset numbers each alternative's groups from the same place.
-      my $frame = $open[-1];
-      if ($frame && defined $frame->{reset}) {
-        $frame->{most} = $count if $count > $frame->{most};
-        $count = $frame->{reset};
-      }
-    } elsif ($pattern =~ /\G\)/gc) {
-      my $frame = pop @open or next;
-      $frame->{group}{close} = $at if $frame->{group};
-      $count = $frame->{most} if defined $frame->{reset} && $frame->{most} > $count;
-    } else {
-      pos($pattern) = $at + 1;
-    }
-
-    push @refs, [ $at, pos($pattern) - $at, @ref ] if @ref;
-  } continue {
-    $at = pos $pattern;
+  my $skip = qr{ \\. | \[ \^? \]? (?: \\. | [^\]] )* \] | . }xs;
+  while ($pattern =~ /\G (?: ($REFERENCE) | $skip )/gcx) {
+    return 1 if defined $1;
   }
 
-  # A late \10 refers to a group if there are that many, as Perl reads it.
-  my $groups = 0;
-  $_->{number} > $groups and $groups = $_->{number} foreach @groups;
-  @refs = grep { $_->[3] ne 'late' || $_->[4] <= $groups } @refs or return $pattern;
-  $_->[3] = 'number' foreach grep { $_->[3] eq 'late' } @refs;
-
-  # One name for each thing referred to, inside every group it covers.
-  my (%name, %insert, %edit);
-  foreach my $ref (@refs) {
-    my ($kind, $by, $key) = @$ref[2 .. 4];
-    my $name = $name{"$by $key"} ||= do {
-      my $name = '_rr' . ++$GROUP_NAME;
-      if ($by eq 'whole') {
-        push @{ $insert{0}[0] }, "(?<$name>";
-        push @{ $insert{ length $pattern }[1] }, ')';
-      }
-      foreach my $group (grep { $by eq 'number' ? $_->{number} == $key
-          : $by eq 'name' && defined $_->{name} && $_->{name} eq $key } @groups) {
-        push @{ $insert{ $group->{end_open} }[0] }, "(?<$name>";
-        push @{ $insert{ $group->{close} }[1] }, ')';
-      }
-      $name;
-    };
-    $edit{ $ref->[0] } = [ $ref->[1],
-        $kind eq 'back'      ? "\\k<$name>"
-      : $kind eq 'recurse'   ? "(?&$name)"
-      : $kind eq 'recursing' ? "(?(R&$name)"
-      :                        "(?(<$name>)" ];
-  }
-
-  # From the end, so earlier positions stay put. At one position, a
-  # reference is replaced after what is inserted before it.
-  foreach my $p (sort { $b <=> $a } keys %edit, keys %insert) {
-    if (my $edit = delete $edit{ $p }) {
-      substr($pattern, $p, $edit->[0]) = $edit->[1];
-    }
-    if (my $insert = delete $insert{ $p }) {
-      substr($pattern, $p, 0) =
-        join '', @{ $insert->[0] || [] }, reverse @{ $insert->[1] || [] };
-    }
-  }
-
-  return $pattern;
+  return 0;
 }
 
 
@@ -1516,15 +1392,13 @@ A pattern may contain braces of its own, as long as they balance:
 
 A pattern that does not compile is reported when the route is added.
 
-A pattern means what it means on its own, whichever route it sits in and
-whatever routes are around it. Its references, by number or name, are to
-its own groups (C<\1>, C<\g{-1}>, C<\k<name>>, C<(?1)>, C<(?&name)>,
-C<(?(1)...)>, C<(?(R1)...)>), C<(?R)> recurses into the pattern alone, and spaces and C<#>
-are literal:
-
-  $r->add(double => '/double/{pair:([a-z])\1}');   # /double/aa, not /double/ab
-
-A pattern can refer only to its own groups, not another placeholder's.
+A pattern may not refer to its own groups: no back-references (C<\1>,
+C<\g{-1}>, C<\k<name>>), recursion (C<(?1)>, C<(?&name)>, C<(?R)>) or
+conditions on a group (C<(?(1)...)>). The patterns of all routes are
+matched as one regex, where a group's number counts every route's groups
+and a name may be another route's, so such a pattern is refused when the
+route is added. Named captures, lookarounds and conditions on them are
+fine, and spaces and C<#> in a pattern are literal.
 
 The special {.format} placeholder can be used to allow an optional file extension to be appended. For example:
 

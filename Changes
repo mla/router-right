@@ -11,17 +11,12 @@
     linear in the routes, not quadratic. The matched route is recorded
     with (*MARK) rather than a code block, so `use re 'eval'` is gone.
 
-  - A placeholder's pattern means what it means on its own. Perl read
-    its references against the whole regex: a numbered one (\1, \g1,
-    (?1), (?(1)...)) counted the groups of the route and of every route
-    matched with it, so /{x:([a-c])\1} never matched, and recursion by
-    name, (?&q), went to the first group named q, which could be another
-    route's. Each reference now names a group of its own, placed inside
-    the groups it means; the pattern's groups keep their names. (?R)
-    recurses into the pattern alone, and url() reads a pattern the same
-    way. A space or # in a pattern is literal; before, the combined
-    regex's /x dropped the space and took # as a comment, breaking the
-    route.
+  - add() refuses a placeholder pattern that refers to one of its groups
+    (\1, \g{-1}, \k<name>, (?1), (?&name), (?R), (?(1)...)). Perl read
+    the reference against the regex of every route matched together, so
+    /{x:([a-c])\1} never matched, and (?&q) could reach another route's
+    group named q. A space or # in a pattern is now literal; before, the
+    combined regex's /x dropped the space and took # as a comment.
 
   - Routes that start with a placeholder (/{lang}/about, a catch-all)
     are no longer copied into the regex of every node below the root.
