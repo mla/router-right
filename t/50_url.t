@@ -136,6 +136,16 @@ describe 'Router url' => sub {
     is $r->url('late', id => 3), '/late/3';
   };
 
+  it 'sets params over a query the path carries' => sub {
+    $r->add(srch => '/search?sort=new', 'Search');
+
+    is $r->url('/search?x=1', q => 2), '/search?x=1&q=2';
+    is $r->url('srch', q => 2), '/search?sort=new&q=2';
+    is $r->url('/search?q=1&x=1', q => 2), '/search?q=2&x=1';
+    is $r->url('/s?x=1', t => [1, 2]), '/s?x=1&t=1&t=2';
+    is $r->url('/s?x=1#f', q => 'a b'), '/s?x=1&q=a+b#f';
+  };
+
   it 'passes a literal path through with a query string' => sub {
     is $r->url('/plain/path', q => 1), '/plain/path?q=1';
   };

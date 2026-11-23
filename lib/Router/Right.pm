@@ -809,7 +809,14 @@ sub url {
 
   if (!$simple) {
     my $uri = URI->new($path);
-    $uri->query_form(\@query);
+    if (defined $uri->query) {
+      # Set over the query the path carries: query_form() would replace it.
+      require URI::QueryParam;
+      $uri->query_param(@query[ $_, $_ + 1 ])
+        foreach grep { !($_ % 2) } 0 .. $#query;
+    } else {
+      $uri->query_form(\@query);
+    }
     return $uri;
   }
   @pairs or return URI->new($path);
